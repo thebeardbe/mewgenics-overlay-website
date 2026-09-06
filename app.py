@@ -57,7 +57,7 @@ def _render(name: str, **ctx) -> HTMLResponse:
 # ── public surface ────────────────────────────────────────────────────────
 @app.get("/", response_class=HTMLResponse)
 def home():
-    return RedirectResponse("/report")
+    return _render("index.html")
 
 
 @app.get("/report", response_class=HTMLResponse)
