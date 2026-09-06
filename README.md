@@ -1,4 +1,5 @@
-# Bugbox — self-hosted bug intake with LLM triage
+# Bugbox — self-hosted website + bug intake with LLM triage
+
 
 A tiny FastAPI service for your VPS that collects bug reports from the
 Mewgenics Breeding Overlay and uses an **LLM to triage them** (severity,
