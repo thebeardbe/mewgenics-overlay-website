@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bugbox · admin</title>
+<style>
+  :root { --bg:#171614; --card:#24211d; --line:#3a3731; --text:#e8e4dc;
+          --muted:#a49f92; --accent:#c62828; --good:#2e7d32; --warn:#b26b0a; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text);
+         font:15px/1.5 system-ui, sans-serif; padding:24px; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  .sub { color:var(--muted); margin-bottom:16px; }
+  .filters { margin-bottom:16px; }
+  .filters button { background:var(--card); color:var(--text); border:1px solid var(--line);
+         border-radius:6px; padding:6px 12px; margin-right:6px; cursor:pointer; }
+  .filters button.active { border-color:var(--accent); }
+  .ticket { background:var(--card); border:1px solid var(--line); border-radius:10px;
+         padding:14px 16px; margin-bottom:12px; }
+  .ticket .top { display:flex; gap:10px; align-items:baseline; flex-wrap:wrap; }
+  .id { color:var(--muted); font-family:ui-monospace, monospace; font-size:12px; }
+  .sev { font-size:11px; padding:1px 8px; border-radius:10px; text-transform:uppercase; }
+  .sev.low { background:#2e2a24; color:#c0b9a9; }
+  .sev.medium { background:#3a2f16; color:#e6c874; }
+  .sev.high { background:#5c2a12; color:#ffab73; }
+  .sev.critical { background:#5c1216; color:#ff8a8a; }
+  .title { font-weight:600; }
+  .meta { color:var(--muted); font-size:12px; margin:4px 0 8px; }
+  .summary { margin:4px 0; }
+  .cause { color:#c7b8e8; font-size:13px; }
+  .cat { font-size:11px; color:var(--muted); border:1px solid var(--line);
+         padding:0 6px; border-radius:4px; }
+  .details { display:none; margin-top:10px; white-space:pre-wrap;
+         font-family:ui-monospace, monospace; font-size:12px; color:#d8d3c8;
+         background:#171614; border:1px solid var(--line); border-radius:8px;
+         padding:10px; max-height:260px; overflow:auto; }
+  .actions button { background:#2e2a24; border:1px solid var(--line); color:var(--text);
+         border-radius:6px; padding:4px 10px; margin-right:6px; cursor:pointer; }
+  .actions button.del { color:#ff8a8a; }
+  .empty { color:var(--muted); text-align:center; padding:40px 0; }
+  .status-tag { font-size:11px; padding:1px 8px; border-radius:10px;
+         background:var(--line); }
+  a.toggle { color:#c7b8e8; cursor:pointer; font-size:13px; }
+</style>
+</head>
+<body>
+  <h1>🐞 Bugbox</h1>
+  <div class="sub">LLM-triaged bug reports for Mewgenics Breeding Overlay</div>
+  <div class="filters">
+    <button data-s="" class="active">All</button>
+    <button data-s="open">Open</button>
+    <button data-s="triaged">Triaged</button>
+    <button data-s="fixed">Fixed</button>
+    <button data-s="wontfix">Won't fix</button>
+    <button data-s="duplicate">Duplicates</button>
+  </div>
+  <div id="list"></div>
+
+<script>
+const el = document.getElementById("list");
+let current = "";
+
+document.querySelectorAll(".filters button").forEach(b =>
+  b.addEventListener("click", () => {
+    document.querySelectorAll(".filters button").forEach(x => x.classList.remove("active"));
+    b.classList.add("active");
+    current = b.dataset.s;
+    load();
+  }));
+
+async function load() {
+  const q = current ? "?status=" + current : "";
+  const r = await fetch("/api/tickets" + q);
+  if (r.status === 401) { location.href = "/login"; return; }
+  const tickets = await r.json();
+  if (!tickets.length) { el.innerHTML = '<div class="empty">No reports here 🐱</div>'; return; }
+  el.innerHTML = tickets.map(t => card(t)).join("");
+  el.querySelectorAll(".toggle").forEach(a => a.onclick = () => {
+    const d = a.parentElement.parentElement.querySelector(".details");
+    const show = d.style.display !== "block";
+    d.style.display = show ? "block" : "none";
+    a.textContent = show ? "hide details" : "show details";
+  });
+  el.querySelectorAll("[data-act]").forEach(btn => btn.onclick = async () => {
+    const rid = btn.dataset.id;
+    const act = btn.dataset.act;
+    await fetch(`/api/tickets/${rid}/${act === "delete" ? "delete" : "status"}`,
+      act === "delete"
+        ? { method: "POST" }
+        : { method: "POST", headers: {"Content-Type": "application/x-www-form-urlencoded"},
+            body: "status=" + act });
+    load();
+  });
+}
+
+function esc(s) {
+  return (s || "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;",
+    ">": "&gt;", '"': "&quot;" }[c]));
+}
+function ago(ts) {
+  const m = Math.round((Date.now() / 1000 - ts) / 60);
+  if (m < 1) return "just now";
+  if (m < 60) return m + "m ago";
+  const h = Math.round(m / 60);
+  return h < 24 ? h + "h ago" : Math.round(h / 24) + "d ago";
+}
+function card(t) {
+  const a = t.analysis || {};
+  const dupes = (a.dupe_ids || []).length
+    ? '<div class="cause">⚠ likely dupe of: ' + a.dupe_ids.map(x => "#" + x).join(", ") + "</div>" : "";
+  const sevCls = ["low","medium","high","critical"].includes(a.severity) ? a.severity : "";
+  return `<div class="ticket">
+    <div class="top">
+      <span class="id">#${t.id}</span>
+      <span class="title">${esc(t.title)}</span>
+      ${a.severity ? `<span class="sev ${sevCls}">${esc(a.severity)}</span>` : ""}
+      <span class="cat">${esc(a.category || t.category)}</span>
+      <span class="status-tag">${t.status}</span>
+    </div>
+    <div class="meta">${ago(t.created)} · v${esc(t.app_version || "?")} · patch ${esc(t.game_patch || "?")}${t.name ? " · " + esc(t.name) : ""}</div>
+    ${a.summary ? `<div class="summary">${esc(a.summary)}</div>` : ""}
+    ${a.likely_cause ? `<div class="cause">🔧 ${esc(a.likely_cause)}</div>` : ""}
+    ${dupes}
+    <a class="toggle">show details</a>
+    <div class="details">${esc(t.body || "(no description)")}
+${"=".repeat(30)}
+${esc((t.log || "").slice(-4000))}</div>
+    <div class="actions" style="margin-top:8px">
+      <button data-act="triaged" data-id="${t.id}">Triaged</button>
+      <button data-act="fixed" data-id="${t.id}">Fixed</button>
+      <button data-act="duplicate" data-id="${t.id}">Duplicate</button>
+      <button data-act="wontfix" data-id="${t.id}">Won't fix</button>
+      <button data-act="delete" data-id="${t.id}" class="del">Delete</button>
+    </div>
+  </div>`;
+}
+load();
+</script>
+</body>
+</html>

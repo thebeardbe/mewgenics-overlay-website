@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Admin login · Bugbox</title>
+<style>
+  body { margin:0; background:#171614; color:#e8e4dc; font:16px system-ui, sans-serif;
+         display:grid; place-items:center; min-height:100vh; }
+  form { width:300px; background:#24211d; padding:28px; border-radius:12px;
+         border:1px solid #3a3731; }
+  input { width:100%; padding:10px; margin:6px 0 14px; border:1px solid #3a3731;
+          border-radius:8px; background:#171614; color:#e8e4dc; }
+  button { width:100%; padding:11px; border:0; border-radius:8px; background:#c62828;
+           color:#fff; font-weight:600; cursor:pointer; }
+  .bad { color:#ef9a9a; font-size:13px; }
+</style>
+</head>
+<body>
+<form method="post" action="/login">
+  <h2 style="margin-top:0">Bugbox admin</h2>
+  {bad}
+  <label>User</label>
+  <input name="user" autocomplete="username">
+  <label>Password</label>
+  <input name="password" type="password" autocomplete="current-password">
+  <button>Sign in</button>
+</form>
+</body>
+</html>

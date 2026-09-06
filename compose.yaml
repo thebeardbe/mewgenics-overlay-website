@@ -1,0 +1,23 @@
+services:
+  bugbox:
+    build: .
+    container_name: bugbox
+    restart: unless-stopped
+    environment:
+      # Admin login
+      BGBOX_ADMIN_USER: admin
+      BGBOX_ADMIN_PASS: "${BGBOX_ADMIN_PASS:?set in .env}"
+      BGBOX_COOKIE_KEY: "${BGBOX_COOKIE_KEY:?set in .env}"
+      # LLM (any OpenAI-compatible endpoint). Examples:
+      #   OpenAI : LLM_BASE_URL=https://api.openai.com/v1
+      #   Ollama : LLM_BASE_URL=http://host.docker.internal:11434/v1
+      LLM_BASE_URL: "${LLM_BASE_URL:-https://api.openai.com/v1}"
+      LLM_API_KEY: "${LLM_API_KEY:-}"
+      LLM_MODEL: "${LLM_MODEL:-gpt-4o-mini}"
+    volumes:
+      - bugbox-data:/data
+    ports:
+      - "127.0.0.1:8200:8000"   # exposed only via your reverse proxy
+
+volumes:
+  bugbox-data:
