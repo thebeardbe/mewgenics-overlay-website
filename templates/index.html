@@ -196,8 +196,6 @@
       SQLite in read-only mode. It never writes, patches or uploads anything.</p></div>
     <div class="card"><h3>🎮 No injection</h3><p>No memory hooks, no DLLs, no mod API. It watches the
       save file the game itself writes, exactly like a text editor watching a file.</p></div>
-    <div class="card"><h3>🔇 No network</h3><p>No telemetry, no updates phone-home, no save uploads.
-      Nothing leaves your machine unless you open a link yourself.</p></div>
     <div class="card"><h3>📄 Open source</h3><p>MIT licensed with the full source on GitHub,
       pinned by automated tests, and buildable from source if you want to verify it yourself.</p></div>
   </div>
@@ -215,10 +213,6 @@
     <div class="card"><h3>🔬 Cross-checked tables</h3><p>Every formula is checked a second time
       against <a href="https://mewgenics.wiki.gg/wiki/Breeding">wiki.gg's datamined Breeding
 tables</a> (stat inheritance, disorders, birth defects, sexuality, compatibility).</p></div>
-    <div class="card"><h3>🧪 Test-pinned</h3><p>
-      <a href="https://github.com/thebeardbe/mewgenics-breeding-overlay/blob/main/tests/test_wiki_math.py">
-      tests/test_wiki_math.py</a> pins each formula to those sources, and a save-safety test requires
-      a save to be byte-identical after an engine pass. A drift from the game data fails CI.</p></div>
   </div>
 </div></section>
 
@@ -232,12 +226,36 @@ tables</a> (stat inheritance, disorders, birth defects, sexuality, compatibility
   <details><summary>Does it modify my save file?</summary>
     <p>No, never. Save files are opened read-only, and live reads happen on a temporary copy. Pinned by
       an automated test.</p></details>
+  <details><summary>Does it need an internet connection?</summary>
+    <p>No. The app has no network code: it does not phone home, upload saves, check for updates or show
+      ads, and it works fully offline. Your browser only opens when you click a link yourself, such as
+      the Report button in the About box.</p></details>
+  <details><summary>Is the math actually correct? How is it verified?</summary>
+    <p>Every formula comes from the game's own datamined code (SciresM's reverse engineering, cross
+      checked against wiki.gg's tables; sources are listed in the footer) and is pinned by automated
+      tests in the repository, including <code>tests/test_wiki_math.py</code>. A change that drifts
+      from the game data fails the test suite instead of shipping. Saves are only ever read, and a
+      save-safety test requires them to stay byte-identical.</p></details>
+  <details><summary>How do I open and hide the overlay?</summary>
+    <p>Windows: press Ctrl+Shift+B anywhere. Linux and other platforms: use the tray icon (a global
+      hotkey is not available there). The 🧿 button toggles click-through so mouse clicks reach the
+      game, and the ✕ button hides the overlay.</p></details>
+  <details><summary>What do I need to run it?</summary>
+    <p>Just the download: the Windows and Linux binaries bundle everything, so there is no Python or
+      installer step (Linux: download, chmod +x, run; NixOS users can nix run the repo instead). You
+      need a real Mewgenics save for full functionality.</p></details>
   <details><summary>Windows says “unknown publisher”. Is it a virus?</summary>
     <p>No. Code-signing certificates cost money, so small open-source projects ship unsigned. Click
       <b>More info → Run anyway</b>, or build it yourself from the public source.</p></details>
   <details><summary>It doesn't find my save / looks wrong after an update</summary>
     <p>Mewgenics is early access and patches often, and a save format change can confuse the parser.
-      Report it with the <b>Feedback</b> button (include the game patch number) and it gets fixed fast.</p></details>
+      The app auto-detects saves on Windows and Linux/Proton. If it misses yours, pick the .sav with
+      the 📁 button, or set MEWGENICS_SAVES_ROOT. If it still looks wrong, report it with the
+      Feedback button and include the game patch number; it gets fixed fast.</p></details>
+  <details><summary>How do I report a bug?</summary>
+    <p>Open the About box (ℹ️) in the app and click Report a problem. No account is needed. The Copy
+      debug info button puts your version, OS and save details on the clipboard to paste into the
+      form; if the app crashed, the tail of <code>overlay.log</code> helps too.</p></details>
   <details><summary>Does it work alongside MewgenicsBreedingManager or CatScan?</summary>
     <p>Yes. It's built on MBM's genetics engine (credited) and reads the same saves; use whichever tool
       suits the moment. They complement each other.</p></details>
@@ -245,7 +263,7 @@ tables</a> (stat inheritance, disorders, birth defects, sexuality, compatibility
 
 <section id="feedback" class="cta"><div class="wrap">
   <h2>Found a bug? Have an idea?</h2>
-  <p class="sub">Tell us, no account needed: reports are triaged by an AI and read by a human.</p>
+  <p class="sub">Tell us, no account needed. Your report goes straight to the developer.</p>
   <a class="btn primary" href="/report">🐞 Report a problem</a>
   <a class="btn secondary" href="https://github.com/thebeardbe/mewgenics-breeding-overlay">Source on GitHub</a>
 </div></section>
