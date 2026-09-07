@@ -46,7 +46,8 @@
 </head>
 <body>
   <h1>🐞 Bugbox</h1>
-  <div class="sub">LLM-triaged bug reports for Mewgenics Breeding Overlay</div>
+  <div class="sub">LLM-triaged bug reports for Mewgenics Breeding Overlay
+    <a href="/logout" style="color:var(--muted);font-size:12px;float:right">sign out</a></div>
   <div class="filters">
     <button data-s="" class="active">All</button>
     <button data-s="open">Open</button>
@@ -108,7 +109,7 @@ function ago(ts) {
 function card(t) {
   const a = t.analysis || {};
   const dupes = (a.dupe_ids || []).length
-    ? '<div class="cause">⚠ likely dupe of: ' + a.dupe_ids.map(x => "#" + x).join(", ") + "</div>" : "";
+    ? '<div class="cause">⚠ likely dupe of: ' + a.dupe_ids.map(x => "#" + esc(x)).join(", ") + "</div>" : "";
   const sevCls = ["low","medium","high","critical"].includes(a.severity) ? a.severity : "";
   return `<div class="ticket">
     <div class="top">

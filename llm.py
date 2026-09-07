@@ -22,6 +22,10 @@ MODEL = os.environ.get("LLM_MODEL", "gpt-4o-mini")
 
 _CATEGORIES = ["parser", "save", "crash", "ui", "breeding", "donations", "other"]
 _SEVERITIES = ["low", "medium", "high", "critical"]
+# Model output is attacker-influenceable via the report body (prompt
+# injection), so everything it returns is treated as untrusted data:
+# bounded lengths, strict enum checks, dupe_ids reduced to safe id strings.
+_DUPE_ID_RE = re.compile(r"^[A-Za-z0-9-]{1,16}$")
 
 
 def available() -> bool:
@@ -75,16 +79,44 @@ def analyze(report: dict, recent: list[dict]) -> dict:
             data = json.loads(resp.read())
         content = data["choices"][0]["message"]["content"]
         parsed = _extract_json(content)
-        parsed.setdefault("severity", "medium")
-        if parsed.get("category") not in _CATEGORIES:
-            parsed["category"] = "other"
-        if parsed.get("severity") not in _SEVERITIES:
-            parsed["severity"] = "medium"
-        parsed.setdefault("dupe_ids", [])
+        parsed = _clean(parsed)
         parsed["model"] = MODEL
         return parsed
     except Exception as exc:  # never let analysis break the report
         return {"error": f"analysis failed: {exc}", "severity": "medium"}
+
+
+def _clean(parsed: dict) -> dict:
+    """Normalise a model response into safe, bounded analysis fields.
+
+    The model is asked to reply with one JSON object, but report bodies are
+    attacker-controlled: a malicious report can try to steer the output (e.g.
+    HTML payloads inside dupe_ids) so the fields are coerced exactly like any
+    other untrusted data before they are stored / rendered.
+    """
+    if not isinstance(parsed, dict):
+        return {}
+    out: dict = {}
+    sev = str(parsed.get("severity", "medium") or "medium").lower()
+    out["severity"] = sev if sev in _SEVERITIES else "medium"
+    cat = str(parsed.get("category", "other") or "other").lower()
+    out["category"] = cat if cat in _CATEGORIES else "other"
+    for key, maxlen in (("summary", 500), ("likely_cause", 800),
+                        ("reply_draft", 500)):
+        val = parsed.get(key)
+        out[key] = (str(val)[:maxlen] if isinstance(val, (str, int, float))
+                    else "")
+    out["needs_reply"] = bool(parsed.get("needs_reply"))
+    ids = parsed.get("dupe_ids")
+    dupes: list[str] = []
+    if isinstance(ids, list):
+        for i in ids:
+            if isinstance(i, (str, int)) and len(dupes) < 5:
+                s = str(i).strip()
+                if s and _DUPE_ID_RE.match(s):
+                    dupes.append(s)
+    out["dupe_ids"] = dupes
+    return out
 
 
 def _extract_json(content: str) -> dict:

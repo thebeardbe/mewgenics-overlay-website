@@ -8,6 +8,7 @@ services:
       BGBOX_ADMIN_USER: admin
       BGBOX_ADMIN_PASS: "${BGBOX_ADMIN_PASS:?set in .env}"
       BGBOX_COOKIE_KEY: "${BGBOX_COOKIE_KEY:?set in .env}"
+      BGBOX_COOKIE_SECURE: "${BGBOX_COOKIE_SECURE:-0}"
       # LLM (any OpenAI-compatible endpoint). Examples:
       #   OpenAI : LLM_BASE_URL=https://api.openai.com/v1
       #   Ollama : LLM_BASE_URL=http://host.docker.internal:11434/v1

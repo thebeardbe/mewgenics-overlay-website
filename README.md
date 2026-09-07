@@ -20,10 +20,19 @@ Players reach it two ways:
 cd bugbox
 cp .env.example .env        # set BGBOX_ADMIN_PASS, BGBOX_COOKIE_KEY,
                             # LLM_API_KEY (or leave empty to disable analysis)
+                            # and BGBOX_COOKIE_SECURE=1 if served over https
 docker compose up -d --build
 ```
 
 The container listens on `127.0.0.1:8200` only — never expose it directly.
+
+**Built-in hardening:** report/login endpoints are per-IP rate limited
+(10/min reports, 5/min logins), request bodies are capped at 400 KB, report
+fields are truncated and type-coerced before storage, admin cookies are
+constant-time verified (httponly + lax; set `BGBOX_COOKIE_SECURE=1` under
+https), the admin page escapes every rendered field (LLM output included),
+and every response gets nosniff/DENY/no-referrer headers. A small test suite
+lives in `tests/` (`python -m pytest tests/ -q`).
 
 In **Nginx Proxy Manager** create a Proxy Host:
 

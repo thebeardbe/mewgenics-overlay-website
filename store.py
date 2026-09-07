@@ -46,6 +46,20 @@ def init() -> None:
         )
 
 
+def _s(value, default: str = "", maxlen: int = 0) -> str:
+    """Coerce an untrusted report field to a bounded string.
+
+    The JSON endpoint accepts arbitrary values (lists, dicts, numbers…); a
+    non-string must never crash the INSERT or smuggle in a giant payload.
+    """
+    if isinstance(value, bool):
+        value = "1" if value else "0"
+    elif not isinstance(value, (str, int, float)):
+        return default
+    s = str(value)
+    return s[:maxlen] if maxlen else s
+
+
 def add(report: dict) -> str:
     rid = uuid.uuid4().hex[:12]
     with _lock, _connect() as conn:
@@ -56,18 +70,23 @@ def add(report: dict) -> str:
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                rid, time.time(), "open", report.get("category", "other"),
-                report.get("name", "")[:80], report.get("contact", "")[:160],
-                (report.get("title") or "Untitled")[:160],
-                report.get("body", ""), report.get("log", ""),
-                report.get("app_version", "")[:32],
-                report.get("game_patch", "")[:64],
+                rid, time.time(), "open",
+                _s(report.get("category"), "other", 40),
+                _s(report.get("name"), "", 80),
+                _s(report.get("contact"), "", 160),
+                _s(report.get("title"), "Untitled", 160),
+                _s(report.get("body"), "", 200_000),
+                _s(report.get("log"), "", 200_000),
+                _s(report.get("app_version"), "", 32),
+                _s(report.get("game_patch"), "", 64),
             ),
         )
     return rid
 
 
 def set_analysis(rid: str, analysis: dict) -> None:
+    if not isinstance(analysis, dict):
+        analysis = {}
     with _lock, _connect() as conn:
         conn.execute(
             "UPDATE reports SET analysis = ? WHERE id = ?",
