@@ -351,3 +351,11 @@ def test_people_page_requires_owner():
     r = client.get("/admin/people", headers=_cookie_headers(
         ADMIN["X-Forwarded-For"], token), follow_redirects=False)
     assert r.status_code == 307 and "/admin" in r.headers["location"]
+
+
+def test_details_toggle_targets_own_ticket():
+    # The toggle must look for .details inside the same .ticket row, not up at
+    # the list container (which made every row open the first row's details).
+    tpl = open("templates/admin.html", encoding="utf-8").read()
+    assert 'a.parentElement.querySelector(".details")' in tpl
+    assert "parentElement.parentElement.querySelector" not in tpl

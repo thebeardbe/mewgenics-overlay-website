@@ -151,7 +151,7 @@ function render() {
   }
   el.innerHTML = rows.map(card).join("");
   el.querySelectorAll(".toggle").forEach(a => a.onclick = () => {
-    const d = a.parentElement.parentElement.querySelector(".details");
+    const d = a.parentElement.querySelector(".details");
     const show = d.style.display !== "block";
     d.style.display = show ? "block" : "none";
     a.textContent = show ? "hide details" : "show details";
