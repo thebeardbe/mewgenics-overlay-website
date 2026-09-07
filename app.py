@@ -1,4 +1,4 @@
-"""Bugbox — self-hosted bug intake with LLM triage.
+"""Bugbox: self-hosted bug intake with LLM triage.
 
 FastAPI app. Two audiences:
   * players  -> GET /report  (no account needed, paste debug info)
@@ -53,10 +53,10 @@ _bucket_lock = threading.Lock()
 
 
 if not ADMIN_PASS:
-    logger.warning("BGBOX_ADMIN_PASS is not set — the admin login is DISABLED "
-                   "(fails closed); set it in the environment.")
+    logger.warning("BGBOX_ADMIN_PASS is not set; the admin login is DISABLED "
+                   "(fails closed). Set it in the environment.")
 if COOKIE_KEY in ("", "change-me", "change-me-too"):
-    logger.warning("BGBOX_COOKIE_KEY is unset or still the default — set a "
+    logger.warning("BGBOX_COOKIE_KEY is unset or still the default. Set a "
                    "long random value so admin cookies cannot be forged.")
 
 
@@ -195,7 +195,7 @@ def submit(
 ):
     if _throttled(f"report:{_client_ip(request)}", *REPORT_RATE_LIMIT):
         return JSONResponse(
-            {"error": "too many reports — try again in a minute"},
+            {"error": "too many reports, try again in a minute"},
             status_code=429)
     rid = store.add({
         "category": category, "title": title, "body": body,
@@ -210,7 +210,7 @@ async def api_report(request: Request):
     """JSON endpoint the overlay (or power users) can POST to directly."""
     if _throttled(f"report:{_client_ip(request)}", *REPORT_RATE_LIMIT):
         return JSONResponse(
-            {"error": "too many reports — try again in a minute"},
+            {"error": "too many reports, try again in a minute"},
             status_code=429)
     try:
         data = await request.json()

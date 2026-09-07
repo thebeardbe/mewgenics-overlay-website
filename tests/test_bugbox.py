@@ -252,3 +252,9 @@ def test_clean_report_payload_is_delimited_and_capped(monkeypatch):
     assert len(log_block.strip()) == 6000  # last 6000 chars of the log
     assert body["max_tokens"] == llm._MAX_OUTPUT_TOKENS
     assert out["severity"] == "high"
+
+
+def test_no_em_dashes_in_user_facing_copy():
+    for name in ("index.html", "report.html", "thanks.html", "login.html"):
+        text = open(f"templates/{name}", encoding="utf-8").read()
+        assert "\u2014" not in text, f"em-dash found in {name}"

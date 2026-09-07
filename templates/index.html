@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Mewgenics Breeding Overlay — breed smarter, safely</title>
-<meta name="description" content="Free, open-source companion overlay for Mewgenics: pick any cat and see every compatible partner ranked by risk, chance and expected 7s — while you play. Read-only, never touches your save.">
+<title>Mewgenics Breeding Overlay · breed smarter, safely</title>
+<meta name="description" content="Free, open-source companion overlay for Mewgenics: pick any cat and see every compatible partner ranked by risk, chance and expected 7s while you play. Read-only, never touches your save.">
 <style>
   :root { --bg:#14120f; --card:#1e1b16; --card2:#262219; --line:#3a3429;
           --text:#ece7dc; --muted:#a49f92; --accent:#c62828; --accent2:#e8a33d;
@@ -27,7 +27,13 @@
   nav .links a:hover { color:var(--text); text-decoration:none; }
 
   /* hero */
-  .hero { padding:72px 0 40px; text-align:center; }
+  .hero { padding:72px 0 40px; text-align:center;
+          background:
+            linear-gradient(rgba(20,18,15,.86), rgba(20,18,15,.93)),
+            url('/static/screenshots/breeding-dark.png') center 25%/cover no-repeat,
+            var(--bg);
+          border-bottom:1px solid var(--line); }
+  .hero .wrap { position:relative; z-index:1; }
   .hero h1 { font-size:42px; line-height:1.15; margin:0 0 14px; }
   .hero h1 .hl { color:var(--accent2); }
   .hero p.tag { color:var(--muted); font-size:19px; max-width:640px; margin:0 auto 34px; }
@@ -58,6 +64,10 @@
   .card h3 .ic { margin-right:8px; }
   .card p { margin:0; color:var(--muted); font-size:14px; }
 
+  .shot { display:grid; place-items:center; min-height:200px; border:1px dashed var(--line);
+          border-radius:12px; color:var(--muted); text-align:center; padding:20px;
+          background:repeating-linear-gradient(45deg,var(--card),var(--card) 14px,
+          var(--card2) 14px,var(--card2) 28px); font-size:14px; }
   .shot { display:grid; place-items:center; min-height:200px; border:1px dashed var(--line);
           border-radius:12px; color:var(--muted); text-align:center; padding:20px;
           background:repeating-linear-gradient(45deg,var(--card),var(--card) 14px,
@@ -103,20 +113,20 @@
 
 <div class="hero"><div class="wrap">
   <h1>Breed <span class="hl">smarter</span> in Mewgenics.<br>Never gamble a litter again.</h1>
-  <p class="tag">Pick any cat and get every compatible partner ranked live — risk, chance
-  per night, expected 7s, family distance, blocked-pair reasons — right on top of your game.</p>
+  <p class="tag">Pick any cat and get every compatible partner ranked live: risk, chance
+  per night, expected 7s, family distance and blocked-pair reasons, right on top of your game.</p>
   <div class="buttons">
-    <!-- TODO: versions auto-track "latest" on GitHub; update the caption text on release. -->
+    <!-- version text is fetched live from the latest GitHub release -->
     <a class="btn primary" href="https://github.com/thebeardbe/mewgenics-breeding-overlay/releases/latest/download/MewgenicsOverlay.exe">
       ⬇️ Download for Windows<small>MewgenicsOverlay.exe · v{version}</small>
     </a>
     <a class="btn secondary" href="https://github.com/thebeardbe/mewgenics-breeding-overlay/releases/latest/download/MewgenicsOverlay">
-      🐧 Download for Linux<small>no install · Ubuntu, Arch, Fedora…</small>
+      🐧 Download for Linux<small>no installer · download, chmod +x, run</small>
     </a>
   </div>
   <p class="alt">NixOS? Just run: <code>nix run github:thebeardbe/mewgenics-breeding-overlay</code></p>
   <div class="badges">
-    <span>🔒 Read-only — <b>never touches your save</b></span>
+    <span>🔒 Read-only: <b>never touches your save</b></span>
     <span>🧬 Built on MBM's genetics engine</span>
     <span>🧡 Free &amp; open source (MIT)</span>
   </div>
@@ -124,17 +134,17 @@
 
 <section id="download"><div class="wrap">
   <h2>Which file do I take?</h2>
-  <p class="sub">No Python, no install — download, run, done.</p>
+  <p class="sub">No Python and no installer. Each platform has a short run step below.</p>
   <div class="grid">
     <div class="card"><h3>🪟 Windows</h3><p>Grab <b>MewgenicsOverlay.exe</b> and double-click it.
-      Windows may show <i>“Windows protected your PC”</i> — click <b>More info → Run anyway</b>.
+      Windows may show <i>“Windows protected your PC”</i>: click <b>More info → Run anyway</b>.
       The app isn't code-signed (that's normal for small open-source tools, not malware).</p></div>
-    <div class="card"><h3>🐧 Linux</h3><p>Grab <b>MewgenicsOverlay</b>, then run
+    <div class="card"><h3>🐧 Linux</h3><p>Grab <b>MewgenicsOverlay</b>, then run it:
       <code>chmod +x MewgenicsOverlay &amp;&amp; ./MewgenicsOverlay</code>.
-      Everything is bundled — no dependencies.</p></div>
+      Everything is bundled; there is nothing else to install.</p></div>
     <div class="card"><h3>❄️ NixOS</h3><p>No download at all:
       <code>nix run github:thebeardbe/mewgenics-breeding-overlay</code>
-      — or <code>nix profile install</code> to keep it.</p></div>
+      (or <code>nix profile install</code> to keep it).</p></div>
   </div>
 </div></section>
 
@@ -143,80 +153,90 @@
   <p class="sub">A floating overlay you summon while Mewgenics runs.</p>
   <div class="grid">
     <div class="card"><h3><span class="ic">⭐</span>Best match</h3><p>One banner answer per cat:
-      the partner most likely to give you the strongest kittens — weighted toward 7s.</p></div>
+      the partner most likely to give you the strongest kittens, weighted toward 7s.</p></div>
     <div class="card"><h3><span class="ic">📊</span>Risk &amp; COI</h3><p>Birth-defect chance for every
-      pair, straight from the inbreeding coefficient — spot the unsafe breed before it happens.</p></div>
+      pair, straight from the inbreeding coefficient, so you spot the unsafe breed before it happens.</p></div>
     <div class="card"><h3><span class="ic">🧬</span>Family &amp; 7s</h3><p>How the two are related
-      (sibling? 2nd cousin?) and what a litter is expected to roll — every stat, every night.</p></div>
+      (sibling? 2nd cousin?) and what a litter is expected to roll, for every stat and every night.</p></div>
     <div class="card"><h3><span class="ic">🚫</span>Blocked pairs explained</h3><p>Straight cats,
-      haters, direct family — the game says no, we say why.</p></div>
+      haters, direct family: the game says no, we say why.</p></div>
     <div class="card"><h3><span class="ic">💝</span>Donation advisor</h3><p>Which cats each unlocked NPC
-      pays best for — and which keepers you should never donate.</p></div>
+      pays best for, and which keepers you should never donate.</p></div>
     <div class="card"><h3><span class="ic">🎨</span>Film-noir UI</h3><p>Dark by default, light on demand,
       readable at a glance mid-run. Sortable columns, plain-language tooltips.</p></div>
   </div>
   <div class="shots">
     <figure><img loading="lazy" src="/static/screenshots/breeding-dark.png"
       alt="Breeding tab: partners ranked by risk, nightly chance, expected 7s, family distance">
-      <figcaption><b>Breeding tab</b> — pick a cat, every compatible partner ranked by risk,
+      <figcaption><b>Breeding tab</b>: pick a cat, every compatible partner ranked by risk,
       nightly chance, expected 7s and family distance.</figcaption></figure>
     <figure><img loading="lazy" src="/static/screenshots/donations-dark.png"
       alt="Donations tab: which cats each NPC pays best for">
-      <figcaption><b>Donation advisor</b> — which cats each unlocked NPC pays best for,
+      <figcaption><b>Donation advisor</b>: which cats each unlocked NPC pays best for,
       and which keepers to never donate.</figcaption></figure>
     <figure><img loading="lazy" src="/static/screenshots/breeding-light.png"
       alt="Breeding tab in the light Noir Bright theme">
-      <figcaption><b>Theme switch</b> — the same breeding view in the light
+      <figcaption><b>Theme switch</b>: the same breeding view in the light
       “Noir · Bright” theme.</figcaption></figure>
   </div>
 </div></section>
 
 <section id="safety"><div class="wrap">
   <h2>Is it safe? Yes.</h2>
-  <p class="sub">This is the question everyone asks — here's the honest answer.</p>
+  <p class="sub">The short answer: it cannot hurt your save, your game or your account.</p>
+  <p>The overlay only <b>reads</b>. It opens a copy of your save file the way a text editor opens a
+    document, and there is no code path that writes to the game or uploads anything. It does not hook
+    the game process, and it contains <b>no network code</b>: while you play it never talks to the
+    internet, and the only time your browser opens is when <i>you</i> click the Report button in the
+    About box. Every release also runs a test that fingerprints a save before and after an engine pass
+    and requires the two to be byte-identical. If you still prefer not to trust the binary, the source
+    is MIT licensed and the README explains how to build it yourself.</p>
   <div class="grid">
     <div class="card"><h3>🔒 Read-only</h3><p>The overlay parses <b>copies</b> of your save and opens
       SQLite in read-only mode. It never writes, patches or uploads anything.</p></div>
-    <div class="card"><h3>🎮 No injection</h3><p>No memory hooks, no DLLs, no mod API — it just watches
-      the save file the game itself writes, exactly like a text editor watching a file.</p></div>
-    <div class="card"><h3>🧪 Test-pinned</h3><p>A test fingerprints a save before and after an engine
-      pass and asserts it is byte-identical. Every release runs it.</p></div>
-    <div class="card"><h3>📄 Open source</h3><p>MIT licensed, full source on GitHub. If you don't trust a
-      binary, build it yourself from source — the recipe is in the README.</p></div>
+    <div class="card"><h3>🎮 No injection</h3><p>No memory hooks, no DLLs, no mod API. It watches the
+      save file the game itself writes, exactly like a text editor watching a file.</p></div>
+    <div class="card"><h3>🔇 No network</h3><p>No telemetry, no updates phone-home, no save uploads.
+      Nothing leaves your machine unless you open a link yourself.</p></div>
+    <div class="card"><h3>📄 Open source</h3><p>MIT licensed with the full source on GitHub,
+      pinned by automated tests, and buildable from source if you want to verify it yourself.</p></div>
   </div>
 </div></section>
 
 <section id="faq"><div class="wrap">
   <h2>FAQ</h2>
-  <p class="sub">Quick answers — more in the <a href="https://github.com/thebeardbe/mewgenics-breeding-overlay#readme">README</a>.</p>
+  <p class="sub">Quick answers; more in the <a href="https://github.com/thebeardbe/mewgenics-breeding-overlay#readme">README</a>.</p>
   <details><summary>Will this get me banned / is it cheating?</summary>
     <p>It's a companion calculator, like a wiki you can hold next to the game. It doesn't change the game
-      or your save — it only reads. That said, no tool can *promise* how a developer feels; it reads local
+      or your save; it only reads. That said, no tool can *promise* how a developer feels; it reads local
       files only and never touches the network while playing.</p></details>
   <details><summary>Does it modify my save file?</summary>
-    <p>No — never. Save files are opened read-only, and live reads happen on a temporary copy. Pinned by
+    <p>No, never. Save files are opened read-only, and live reads happen on a temporary copy. Pinned by
       an automated test.</p></details>
   <details><summary>Windows says “unknown publisher”. Is it a virus?</summary>
     <p>No. Code-signing certificates cost money, so small open-source projects ship unsigned. Click
       <b>More info → Run anyway</b>, or build it yourself from the public source.</p></details>
   <details><summary>It doesn't find my save / looks wrong after an update</summary>
-    <p>Mewgenics is early access and patches often — a save format change can confuse the parser.
+    <p>Mewgenics is early access and patches often, and a save format change can confuse the parser.
       Report it with the <b>Feedback</b> button (include the game patch number) and it gets fixed fast.</p></details>
   <details><summary>Does it work alongside MewgenicsBreedingManager or CatScan?</summary>
-    <p>Yes. It's built on MBM's genetics engine (credited) and reads the same saves — use whichever tool
+    <p>Yes. It's built on MBM's genetics engine (credited) and reads the same saves; use whichever tool
       suits the moment. They complement each other.</p></details>
 </div></section>
 
 <section id="feedback" class="cta"><div class="wrap">
   <h2>Found a bug? Have an idea?</h2>
-  <p class="sub">Tell us — no account needed, reports get triaged by an AI and read by a human.</p>
+  <p class="sub">Tell us, no account needed: reports are triaged by an AI and read by a human.</p>
   <a class="btn primary" href="/report">🐞 Report a problem</a>
   <a class="btn secondary" href="https://github.com/thebeardbe/mewgenics-breeding-overlay">Source on GitHub</a>
 </div></section>
 
 <footer><div class="wrap">
-  <p><b>Mewgenics Breeding Overlay</b> — built by <a href="https://github.com/thebeardbe">TheBeardBE</a> for the community.
+  <p><b>Mewgenics Breeding Overlay</b>, built by <a href="https://github.com/thebeardbe">TheBeardBE</a> for the community.
   Free · MIT · read-only. <span class="pill">v{version}</span></p>
+  <p>Developed with coding assistance from an AI, via <a href="https://pi.dev">pi.dev</a>. To be clear: the
+    AI is a helper, not the author. The design, the testing and every decision are human, and the code is
+    reviewed before it ships.</p>
   <p>Genetics engine &amp; parser: <a href="https://github.com/frankieg33/MewgenicsBreedingManager">MewgenicsBreedingManager</a>
   (MIT) · save research: <a href="https://github.com/pzx521521/mewgenics-save-editor">pzx521521</a> &amp; the community ·
   game: <a href="https://store.steampowered.com/app/686060/">Mewgenics</a></p>
