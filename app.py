@@ -469,7 +469,9 @@ def api_users(request: Request):
     user, err = _require_owner(request)
     if err:
         return err
-    return store.list_users()
+    # Never expose password hashes, even to the owner.
+    return [{k: v for k, v in u.items() if k != "password_hash"}
+            for u in store.list_users()]
 
 
 @app.post("/api/users/github")
