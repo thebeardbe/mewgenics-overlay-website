@@ -13,17 +13,29 @@
   button { width:100%; padding:11px; border:0; border-radius:8px; background:#c62828;
            color:#fff; font-weight:600; cursor:pointer; }
   .bad { color:#ef9a9a; font-size:13px; }
+  .or { display:flex; align-items:center; gap:10px; margin:18px 0 2px;
+        color:var(--muted); font-size:12px; }
+  .or::before, .or::after { content:""; flex:1; height:1px; background:#3a3731; }
+  .gh { display:block; margin-top:14px; width:100%; padding:11px; border-radius:8px;
+        background:#24292f; color:#fff; text-align:center; text-decoration:none;
+        font-weight:600; }
+  .gh:hover { background:#2f363d; text-decoration:none; }
+  .sub { color:#a49f92; font-size:12px; text-align:center; margin-top:14px; }
 </style>
 </head>
 <body>
 <form method="post" action="/login">
   <h2 style="margin-top:0">Bugbox admin</h2>
   {bad}
+  {note}
   <label>User</label>
   <input name="user" autocomplete="username">
   <label>Password</label>
   <input name="password" type="password" autocomplete="current-password">
   <button>Sign in</button>
 </form>
+<div class="wrap" style="width:300px;margin:0 auto">
+  {github_block}
+</div>
 </body>
 </html>

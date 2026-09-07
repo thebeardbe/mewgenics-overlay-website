@@ -2,10 +2,12 @@
 
 
 A tiny FastAPI service for your VPS that collects bug reports from the
-Mewgenics Breeding Overlay and uses an **LLM to triage them** (severity,
+Mewgenics Breeding Overlay and triages them (severity,
 category, duplicate detection, likely cause). Reporters need **no account** —
-they open a link, paste, and submit. You read the triaged queue in a
-password-protected admin UI.
+they open a link, paste, and submit. The developer reads the queue in a
+password-protected admin UI with **multi-user access**: one local `owner`
+account plus optional GitHub developer sign-ins that must be approved by the
+owner on the People page before they gain access.
 
 Players reach it two ways:
 
@@ -25,6 +27,17 @@ docker compose up -d --build
 ```
 
 The container listens on `127.0.0.1:8200` only — never expose it directly.
+
+**Admin access (multi-user):** the login page always offers the local owner
+account (`BGBOX_ADMIN_USER` / `BGBOX_ADMIN_PASS`). To add developers, create a
+[GitHub OAuth App](https://github.com/settings/developers) whose callback URL
+is `https://<your-domain>/auth/github/callback`, then set `GITHUB_CLIENT_ID` /
+`GITHUB_CLIENT_SECRET` (and `GITHUB_REDIRECT_URI` if the callback is not
+auto-detected). Anyone who signs in with GitHub lands as **pending** and stays
+locked until you approve them on the **People** page (`/admin/people`, owner
+only), where you can also pre-approve a GitHub login, revoke access (signs the
+user out immediately) or remove a user entirely. The owner account itself
+cannot be removed or demoted.
 
 **Built-in hardening:** report/login endpoints are per-IP rate limited
 (10/min reports, 5/min logins), request bodies are capped at 400 KB, report
@@ -77,6 +90,10 @@ and reports still land in the admin queue.
 | `POST /submit` | form handler (redirects to thanks) |
 | `POST /api/report` | JSON intake (overlay) |
 | `GET /admin` | admin UI (login) |
+| `GET /admin/people` | People page (owner) |
+| `GET /login/github` · `GET /auth/github/callback` | GitHub developer sign-in |
+| `GET /api/users` · `POST /api/users/github` | list users / pre-approve (owner) |
+| `POST /api/users/{id}/status` · `POST /api/users/{id}/delete` | approve, deny, revoke, remove (owner) |
 | `GET /api/tickets[?status=]` | list reports (auth) |
 | `POST /api/tickets/{id}/status` | set status (auth) |
 | `POST /api/tickets/{id}/delete` | delete (auth) |

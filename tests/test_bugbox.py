@@ -41,12 +41,13 @@ def _login_client() -> TestClient:
 @pytest.fixture(autouse=True)
 def _fresh_db():
     # Each test gets a clean database + fresh rate buckets + a stable version
-    # cache (no background GitHub fetches during tests).
+    # cache (no background GitHub fetches during tests) + a seeded owner.
     for f in os.listdir(_DATA):
         os.unlink(os.path.join(_DATA, f))
     bugbox_app._buckets.clear()
     bugbox_app._version_cache.update(version="0.1.46", ts=float("inf"))
     store.init()
+    store.ensure_owner(bugbox_app.ADMIN_USER, bugbox_app.ADMIN_PASS)
 
 
 def test_pages_render():
@@ -258,3 +259,95 @@ def test_no_em_dashes_in_user_facing_copy():
     for name in ("index.html", "report.html", "thanks.html", "login.html"):
         text = open(f"templates/{name}", encoding="utf-8").read()
         assert "\u2014" not in text, f"em-dash found in {name}"
+
+
+# ── multi-tenant admins (owner + GitHub developers) ────────────────────────
+def _cookie_headers(ip, token):
+    return {"X-Forwarded-For": ip, "Cookie": f"bugbox_admin={token}"}
+
+
+def test_github_disabled_when_not_configured():
+    assert bugbox_app.GITHUB_ENABLED is False
+    r = client.get("/login/github", follow_redirects=False)
+    assert r.status_code == 303
+    assert "gh-unavailable" in r.headers["location"]
+    assert "GitHub developer sign-in" not in client.get("/login").text
+
+
+def test_owner_can_preapprove_and_manage_users():
+    owner = _login_client()
+    # owner page renders
+    assert owner.get("/admin/people", headers=ADMIN).status_code == 200
+
+    r = owner.post("/api/users/github", data={"login": "devone"},
+                   headers=ADMIN)
+    assert r.status_code == 200
+    uid = r.json()["id"]
+
+    users = owner.get("/api/users", headers=ADMIN).json()
+    assert any(u["username"] == "devone" and u["status"] == "approved"
+               and u["github_login"] == "devone" for u in users)
+
+    # deny, then re-approve
+    assert owner.post(f"/api/users/{uid}/status", data={"status": "denied"},
+                      headers=ADMIN).status_code == 200
+    assert owner.post(f"/api/users/{uid}/status", data={"status": "approved"},
+                      headers=ADMIN).status_code == 200
+    # owner cannot be touched
+    owner_id = [u for u in users if u["role"] == "owner"][0]["id"]
+    assert owner.post(f"/api/users/{owner_id}/status",
+                      data={"status": "denied"},
+                      headers=ADMIN).status_code == 400
+    assert owner.post(f"/api/users/{owner_id}/delete",
+                      headers=ADMIN).status_code == 400
+    # remove works
+    assert owner.post(f"/api/users/{uid}/delete", headers=ADMIN).status_code == 200
+    assert not any(u["id"] == uid for u in owner.get("/api/users",
+                                                     headers=ADMIN).json())
+
+
+def test_pending_user_is_locked_and_revoking_kills_sessions():
+    owner = _login_client()
+    # a developer signs in via GitHub for the first time -> pending
+    pending = store.create_github_user("9001", "devtwo", status="pending")
+    pid = pending["id"]
+    # even a session token cannot get in while pending
+    token = store.create_session(pid)
+    assert client.get("/api/tickets", headers=_cookie_headers(ADMIN["X-Forwarded-For"],
+                                                              token)).status_code == 401
+
+    # owner approves -> now the session works
+    owner.post(f"/api/users/{pid}/status", data={"status": "approved"},
+               headers=ADMIN)
+    assert client.get("/api/tickets", headers=_cookie_headers(
+        ADMIN["X-Forwarded-For"], token)).status_code == 200
+
+    # a developer (role admin, not owner) cannot manage people
+    assert client.get("/api/users", headers=_cookie_headers(
+        ADMIN["X-Forwarded-For"], token)).status_code == 403
+    r = client.get("/admin/people", headers=_cookie_headers(
+        ADMIN["X-Forwarded-For"], token), follow_redirects=False)
+    assert r.status_code == 307 and "/admin" in r.headers["location"]
+
+    # revoking signs the developer out immediately
+    owner.post(f"/api/users/{pid}/status", data={"status": "pending"},
+               headers=ADMIN)
+    assert client.get("/api/tickets", headers=_cookie_headers(
+        ADMIN["X-Forwarded-For"], token)).status_code == 401
+
+
+def test_access_page_states():
+    assert "requested access" in client.get("/access?login=devthree").text
+    assert "was denied" in client.get("/access?login=devthree&status=denied").text
+
+
+def test_people_page_requires_owner():
+    # anonymous -> redirect to login
+    r = client.get("/admin/people", follow_redirects=False)
+    assert r.status_code == 307 and "/login" in r.headers["location"]
+    # a plain approved developer cannot see it (they are redirected to /admin)
+    dev = store.create_github_user("7777", "devfour", status="approved")
+    token = store.create_session(dev["id"])
+    r = client.get("/admin/people", headers=_cookie_headers(
+        ADMIN["X-Forwarded-For"], token), follow_redirects=False)
+    assert r.status_code == 307 and "/admin" in r.headers["location"]

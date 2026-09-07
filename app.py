@@ -2,22 +2,30 @@
 
 FastAPI app. Two audiences:
   * players  -> GET /report  (no account needed, paste debug info)
-  * you      -> GET /admin   (token login, list/read/triage reports)
+  * you      -> GET /admin   (login, list/read/triage reports)
 Reports may also arrive as JSON POSTs from the overlay itself.
+
+Admin access is multi-tenant: one local `owner` account (from environment
+variables) plus GitHub-linked developer accounts. New GitHub accounts start
+as `pending` and only gain access after the owner approves them on the
+People page (/admin/people). GitHub sign-in is optional: when
+GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET are not configured, the login page
+only offers the local owner account.
 
 Run:  uvicorn app:app --host 0.0.0.0 --port 8000   (see compose.yaml)
 """
 
 from __future__ import annotations
 
-import hashlib
-import hmac
+import html
 import json
 import logging
 import os
 import re
+import secrets
 import threading
 import time
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -37,11 +45,19 @@ TEMPLATES = Path(__file__).parent / "templates"
 STATIC_DIR = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR), check_dir=False),
           name="static")
+
 ADMIN_USER = os.environ.get("BGBOX_ADMIN_USER", "admin")
 ADMIN_PASS = os.environ.get("BGBOX_ADMIN_PASS", "")
 COOKIE_KEY = os.environ.get("BGBOX_COOKIE_KEY", "change-me")
 COOKIE_SECURE = os.environ.get("BGBOX_COOKIE_SECURE", "").lower() not in (
     "", "0", "false", "no")
+
+# GitHub OAuth (optional). Register an OAuth App on GitHub with the callback
+# URL set to your deployed /auth/github/callback.
+GITHUB_CLIENT_ID = os.environ.get("GITHUB_CLIENT_ID", "")
+GITHUB_CLIENT_SECRET = os.environ.get("GITHUB_CLIENT_SECRET", "")
+GITHUB_REDIRECT_URI = os.environ.get("GITHUB_REDIRECT_URI", "")
+GITHUB_ENABLED = bool(GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET)
 
 MAX_BODY_BYTES = 400_000          # reject anything larger up front (nginx too)
 REPORT_RATE_LIMIT = (10, 60)      # (max, window seconds) per IP
@@ -51,13 +67,17 @@ LOGIN_RATE_LIMIT = (5, 60)
 _buckets: dict = {}
 _bucket_lock = threading.Lock()
 
+store.ensure_owner(ADMIN_USER, ADMIN_PASS)
 
 if not ADMIN_PASS:
-    logger.warning("BGBOX_ADMIN_PASS is not set; the admin login is DISABLED "
-                   "(fails closed). Set it in the environment.")
+    logger.warning("BGBOX_ADMIN_PASS is not set; the local owner login is "
+                   "DISABLED (fails closed). Set it in the environment.")
 if COOKIE_KEY in ("", "change-me", "change-me-too"):
     logger.warning("BGBOX_COOKIE_KEY is unset or still the default. Set a "
-                   "long random value so admin cookies cannot be forged.")
+                   "long random value so session cookies cannot be forged.")
+if not GITHUB_ENABLED:
+    logger.info("GitHub sign-in disabled (set GITHUB_CLIENT_ID and "
+                "GITHUB_CLIENT_SECRET to enable developer accounts).")
 
 
 @app.middleware("http")
@@ -92,36 +112,48 @@ def _throttled(key: str, limit: int, window: float) -> bool:
         return bucket[1] > limit
 
 
-def _admin_token(user: str, password: str) -> str:
-    return hmac.new(
-        COOKIE_KEY.encode(), f"{user}:{password}".encode(), hashlib.sha256
-    ).hexdigest()
+# ── auth ──────────────────────────────────────────────────────────────────
+
+def _current_user(request: Request) -> dict | None:
+    """The logged-in user, but only when they are still approved."""
+    user = store.session_user(request.cookies.get("bugbox_admin"))
+    if user is None or user.get("status") != "approved":
+        return None
+    return user
 
 
-def _is_admin(request: Request) -> bool:
-    want = _admin_token(ADMIN_USER, ADMIN_PASS)
-    got = request.cookies.get("bugbox_admin")
-    return bool(got and ADMIN_PASS) and hmac.compare_digest(got, want)
+def _login_cookie(resp: Response, user_id: int) -> None:
+    token = store.create_session(user_id)
+    resp.set_cookie("bugbox_admin", token, httponly=True, samesite="lax",
+                    secure=COOKIE_SECURE, max_age=60 * 60 * 24 * 30)
+
+
+def _logout_cookie(resp: Response, request: Request) -> None:
+    token = request.cookies.get("bugbox_admin")
+    if token:
+        store.delete_session(token)
+    resp.delete_cookie("bugbox_admin")
 
 
 def _render(name: str, **ctx) -> HTMLResponse:
-    html = (TEMPLATES / name).read_text(encoding="utf-8")
+    tpl = (TEMPLATES / name).read_text(encoding="utf-8")
 
     def _sub(m):
         key = m.group(1)
         return str(ctx.get(key, m.group(0)))
 
     # Only swap {word} placeholders; CSS braces ({ }) are left untouched.
-    html = re.sub(r"\{(\w+)\}", _sub, html)
-    return HTMLResponse(html)
+    html_out = re.sub(r"\{(\w+)\}", _sub, tpl)
+    return HTMLResponse(html_out)
+
+
+def _github_redirect_uri(request: Request) -> str:
+    if GITHUB_REDIRECT_URI:
+        return GITHUB_REDIRECT_URI
+    return f"{request.url.scheme}://{request.url.netloc}/auth/github/callback"
 
 
 # ── latest-overlay-version (for the download buttons / version pill) ───────
-# The buttons already hit /releases/latest/download/... (always newest); only
-# the *displayed* version is dynamic. Fetched once per TTL from the GitHub
-# releases API and refreshed lazily in the background so page loads never
-# block on the network; falls back to the last known value (env or a baked
-# default) when the API is unreachable or rate-limited.
 _VERSION_URL = ("https://api.github.com/repos/thebeardbe/"
                 "mewgenics-breeding-overlay/releases/latest")
 _DEFAULT_VERSION = os.environ.get("BGBOX_OVERLAY_VERSION", "0.1.46")
@@ -237,52 +269,177 @@ def _analyze_in_background(rid: str) -> None:
     threading.Thread(target=job, daemon=True).start()
 
 
-# ── admin ─────────────────────────────────────────────────────────────────
+# ── admin auth ────────────────────────────────────────────────────────────
 @app.get("/login", response_class=HTMLResponse)
 def login_page(request: Request):
     bad = ("<p class='bad'>Wrong user or password.</p>"
            if request.query_params.get("bad") else "")
-    return _render("login.html", bad=bad)
+    note = ""
+    if request.query_params.get("note") == "gh-unavailable":
+        note = ("<p class='bad'>GitHub sign-in is not enabled on this "
+                "server.</p>")
+    github_block = ""
+    if GITHUB_ENABLED:
+        github_block = (
+            "<div class='or'>or</div>"
+            "<a class='gh' href='/login/github'>GitHub developer sign-in</a>")
+    return _render("login.html", bad=bad, note=note,
+                   github_block=github_block)
 
 
 @app.post("/login")
 def login(request: Request, user: str = Form(""), password: str = Form("")):
+    """Local owner login (the only local account)."""
     if _throttled(f"login:{_client_ip(request)}", *LOGIN_RATE_LIMIT):
         return RedirectResponse("/login?bad=1", status_code=303)
-    if ADMIN_PASS and hmac.compare_digest(user, ADMIN_USER) \
-            and hmac.compare_digest(password, ADMIN_PASS):
+    owner = None
+    if ADMIN_PASS:
+        owner = store.user_by_username(ADMIN_USER)
+    if owner and owner.get("role") == "owner" and owner.get("status") == \
+            "approved" and store.hmac_compare(user, owner["username"]) \
+            and store.verify_password(password, owner["password_hash"]):
         resp = RedirectResponse("/admin", status_code=303)
-        resp.set_cookie("bugbox_admin", _admin_token(user, password),
-                        httponly=True, samesite="lax", secure=COOKIE_SECURE,
-                        max_age=60 * 60 * 24 * 30)
+        _login_cookie(resp, owner["id"])
         return resp
     return RedirectResponse("/login?bad=1", status_code=303)
 
 
-@app.get("/logout")
-def logout():
-    resp = RedirectResponse("/login", status_code=303)
-    resp.delete_cookie("bugbox_admin")
+@app.get("/login/github")
+def github_login(request: Request):
+    """Start GitHub OAuth (state cookie prevents CSRF on the callback)."""
+    if not GITHUB_ENABLED:
+        return RedirectResponse("/login?note=gh-unavailable", status_code=303)
+    if _throttled(f"login:{_client_ip(request)}", *LOGIN_RATE_LIMIT):
+        return RedirectResponse("/login?bad=1", status_code=303)
+    state = secrets.token_urlsafe(18)
+    resp = RedirectResponse(
+        "https://github.com/login/oauth/authorize?"
+        + urllib.parse.urlencode({
+            "client_id": GITHUB_CLIENT_ID,
+            "redirect_uri": _github_redirect_uri(request),
+            "scope": "read:user",
+            "state": state,
+        }),
+        status_code=303)
+    resp.set_cookie("oauth_state", state, httponly=True, samesite="lax",
+                    secure=COOKIE_SECURE, max_age=600)
     return resp
 
 
+@app.get("/auth/github/callback")
+def github_callback(request: Request, code: str = "", state: str = ""):
+    """Exchange the OAuth code, then approve-or-pending the developer."""
+    expected = request.cookies.get("oauth_state")
+    resp = RedirectResponse("/login", status_code=303)
+    resp.delete_cookie("oauth_state")
+    if not GITHUB_ENABLED or not code or not state \
+            or not expected or not store.hmac_compare(state, expected):
+        return RedirectResponse("/login?bad=1", status_code=303)
+    try:
+        token = _gh_access_token(code, request)
+        profile = _gh_user(token)
+    except Exception:
+        logger.exception("github oauth failed")
+        return RedirectResponse("/login?bad=1", status_code=303)
+    gh_id = str(profile.get("id") or "")
+    gh_login = str(profile.get("login") or "")
+    if not gh_id or not gh_login:
+        return RedirectResponse("/login?bad=1", status_code=303)
+    user = store.user_by_github(gh_id, gh_login)
+    if user is None:
+        user = store.create_github_user(gh_id, gh_login, status="pending")
+    if user.get("status") != "approved":
+        page = RedirectResponse(f"/access?login={urllib.parse.quote(gh_login)}"
+                                f"&status={user.get('status', 'pending')}",
+                                status_code=303)
+        return page
+    resp = RedirectResponse("/admin", status_code=303)
+    _login_cookie(resp, user["id"])
+    return resp
+
+
+def _gh_access_token(code: str, request: Request) -> str:
+    payload = urllib.parse.urlencode({
+        "client_id": GITHUB_CLIENT_ID,
+        "client_secret": GITHUB_CLIENT_SECRET,
+        "code": code,
+        "redirect_uri": _github_redirect_uri(request),
+    }).encode()
+    req = urllib.request.Request(
+        "https://github.com/login/oauth/access_token", data=payload,
+        headers={"Accept": "application/json",
+                 "User-Agent": "bugbox-oauth"})
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+    token = data.get("access_token")
+    if not token:
+        raise RuntimeError("no access_token in github response")
+    return str(token)
+
+
+def _gh_user(token: str) -> dict:
+    req = urllib.request.Request(
+        "https://api.github.com/user",
+        headers={"Authorization": f"Bearer {token}",
+                 "Accept": "application/vnd.github+json",
+                 "User-Agent": "bugbox-oauth"})
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+@app.get("/access", response_class=HTMLResponse)
+def access_page(request: Request, login: str = "", status: str = ""):
+    """Shown after a GitHub sign-in that is pending / denied."""
+    safe_login = html.escape(login or "your account")
+    safe_status = html.escape(status or "pending")
+    if status == "denied":
+        msg = (f"Access for <b>{safe_login}</b> was denied. If you believe "
+               "this is a mistake, ask the owner to re-approve you.")
+    else:
+        msg = (f"<b>{safe_login}</b> requested access. The owner must approve "
+               "the account on the People page before it can sign in.")
+    return _render("access.html", message=msg, status=safe_status)
+
+
+@app.get("/logout")
+def logout(request: Request):
+    resp = RedirectResponse("/login", status_code=303)
+    _logout_cookie(resp, request)
+    return resp
+
+
+# ── admin ─────────────────────────────────────────────────────────────────
 @app.get("/admin", response_class=HTMLResponse)
 def admin_page(request: Request):
-    if not _is_admin(request):
+    user = _current_user(request)
+    if user is None:
         return RedirectResponse("/login")
-    return _render("admin.html")
+    people_link = ('<a href="/admin/people" style="color:var(--muted);'
+                   'font-size:12px;margin-left:12px">People</a>'
+                   if user.get("role") == "owner" else "")
+    return _render("admin.html", people_link=people_link)
+
+
+@app.get("/admin/people", response_class=HTMLResponse)
+def people_page(request: Request):
+    user = _current_user(request)
+    if user is None:
+        return RedirectResponse("/login")
+    if user.get("role") != "owner":
+        return RedirectResponse("/admin")
+    return _render("people.html")
 
 
 @app.get("/api/tickets")
 def api_tickets(request: Request, status: str | None = None):
-    if not _is_admin(request):
+    if _current_user(request) is None:
         return JSONResponse({"error": "unauthorized"}, status_code=401)
     return store.list_reports(status)
 
 
 @app.post("/api/tickets/{rid}/status")
 def api_status(request: Request, rid: str, status: str = Form("")):
-    if not _is_admin(request):
+    if _current_user(request) is None:
         return JSONResponse({"error": "unauthorized"}, status_code=401)
     if status in {"open", "triaged", "fixed", "wontfix", "duplicate"}:
         store.update_status(rid, status)
@@ -291,7 +448,79 @@ def api_status(request: Request, rid: str, status: str = Form("")):
 
 @app.post("/api/tickets/{rid}/delete")
 def api_delete(request: Request, rid: str):
-    if not _is_admin(request):
+    if _current_user(request) is None:
         return JSONResponse({"error": "unauthorized"}, status_code=401)
     store.delete_report(rid)
     return {"ok": True}
+
+
+# ── people management (owner only) ────────────────────────────────────────
+def _require_owner(request: Request):
+    user = _current_user(request)
+    if user is None:
+        return None, JSONResponse({"error": "unauthorized"}, status_code=401)
+    if user.get("role") != "owner":
+        return None, JSONResponse({"error": "owner only"}, status_code=403)
+    return user, None
+
+
+@app.get("/api/users")
+def api_users(request: Request):
+    user, err = _require_owner(request)
+    if err:
+        return err
+    return store.list_users()
+
+
+@app.post("/api/users/github")
+def api_users_github(request: Request, login: str = Form("")):
+    user, err = _require_owner(request)
+    if err:
+        return err
+    created = store.add_github_preapproval(login)
+    if created is None:
+        return JSONResponse({"error": "invalid github login"}, status_code=400)
+    return created
+
+
+@app.post("/api/users/{uid}/status")
+def api_user_status(request: Request, uid: int,
+                    status: str = Form("pending")):
+    user, err = _require_owner(request)
+    if err:
+        return err
+    if status not in {"approved", "pending", "denied"}:
+        return JSONResponse({"error": "bad status"}, status_code=400)
+    target = _user_or_404(uid)
+    if target is None:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    if target.get("role") == "owner":
+        return JSONResponse({"error": "cannot change the owner"},
+                            status_code=400)
+    store.set_user_status(uid, status)
+    if status != "approved":
+        # Locked-out users must not keep live sessions.
+        store.delete_sessions_for_user(uid)
+    return {"ok": True}
+
+
+@app.post("/api/users/{uid}/delete")
+def api_user_delete(request: Request, uid: int):
+    user, err = _require_owner(request)
+    if err:
+        return err
+    target = _user_or_404(uid)
+    if target is None:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    if target.get("role") == "owner":
+        return JSONResponse({"error": "cannot delete the owner"},
+                            status_code=400)
+    store.delete_user(uid)
+    return {"ok": True}
+
+
+def _user_or_404(uid: int) -> dict | None:
+    for u in store.list_users():
+        if u["id"] == uid:
+            return u
+    return None
