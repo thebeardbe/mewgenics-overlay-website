@@ -163,13 +163,14 @@ function render() {
 
 function card(t) {
   const a = t.analysis || {};
+  const relList = Array.isArray(t.related) ? t.related : [];
   const dupes = (a.dupe_ids || []).length
     ? '<div class="cause">⚠ likely dupe of: ' + a.dupe_ids.map(x => "#" + esc(x)).join(", ") + "</div>" : "";
   const sevCls = ["low","medium","high","critical"].includes(a.severity) ? a.severity : "";
   const preview = a.summary ? ""
     : (t.body ? `<div class="prev">${esc(t.body.replace(/\s+/g, " ")).slice(0, 200)}${t.body.length > 200 ? "…" : ""}</div>` : "");
-  const rels = (t.related || []).length
-    ? '<div class="rels">🔗 related: ' + t.related.map(x => `<span class="chip" data-goto="${esc(x)}">#${esc(x)}</span>`).join(" ") + "</div>" : "";
+  const rels = relList.length
+    ? '<div class="rels">🔗 related: ' + relList.map(x => `<span class="chip" data-goto="${esc(x)}">#${esc(x)}</span>`).join(" ") + "</div>" : "";
   return `<div class="ticket">
     <div class="top">
       <span class="id">#${t.id}</span>
