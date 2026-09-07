@@ -7,6 +7,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app.py llm.py store.py ./
 COPY templates ./templates
+COPY static ./static
 
 ENV BGBOX_DATA=/data
 VOLUME /data

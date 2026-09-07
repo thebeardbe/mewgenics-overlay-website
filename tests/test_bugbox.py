@@ -40,10 +40,12 @@ def _login_client() -> TestClient:
 
 @pytest.fixture(autouse=True)
 def _fresh_db():
-    # Each test gets a clean database + fresh rate buckets.
+    # Each test gets a clean database + fresh rate buckets + a stable version
+    # cache (no background GitHub fetches during tests).
     for f in os.listdir(_DATA):
         os.unlink(os.path.join(_DATA, f))
     bugbox_app._buckets.clear()
+    bugbox_app._version_cache.update(version="0.1.46", ts=float("inf"))
     store.init()
 
 
@@ -51,6 +53,20 @@ def test_pages_render():
     assert client.get("/").status_code == 200
     assert client.get("/report").status_code == 200
     assert "v0.1.46" in client.get("/").text
+
+
+def test_landing_version_comes_from_cache_not_placeholder():
+    bugbox_app._version_cache.update(version="9.9.9", ts=float("inf"))
+    html = client.get("/").text
+    assert "v9.9.9" in html                 # caption + pill rendered dynamically
+    assert "{version}" not in html          # no raw placeholder left behind
+
+
+def test_static_screenshots_are_served():
+    r = client.get("/static/screenshots/breeding-dark.png")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("image/")
+    assert client.get("/static/screenshots/donations-dark.png").status_code == 200
 
 
 def test_submit_creates_ticket():

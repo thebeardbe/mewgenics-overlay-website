@@ -62,6 +62,12 @@
           border-radius:12px; color:var(--muted); text-align:center; padding:20px;
           background:repeating-linear-gradient(45deg,var(--card),var(--card) 14px,
           var(--card2) 14px,var(--card2) 28px); font-size:14px; }
+  .shots { display:grid; gap:16px; margin-top:18px; }
+  .shots figure { margin:0; border:1px solid var(--line); border-radius:12px;
+          overflow:hidden; background:var(--card); }
+  .shots img { display:block; width:100%; height:auto; }
+  .shots figcaption { padding:8px 14px; color:var(--muted); font-size:13px; }
+  .shots figcaption b { color:var(--text); }
 
   /* FAQ */
   details { background:var(--card); border:1px solid var(--line); border-radius:10px;
@@ -102,7 +108,7 @@
   <div class="buttons">
     <!-- TODO: versions auto-track "latest" on GitHub; update the caption text on release. -->
     <a class="btn primary" href="https://github.com/thebeardbe/mewgenics-breeding-overlay/releases/latest/download/MewgenicsOverlay.exe">
-      ⬇️ Download for Windows<small>MewgenicsOverlay.exe · v0.1.46</small>
+      ⬇️ Download for Windows<small>MewgenicsOverlay.exe · v{version}</small>
     </a>
     <a class="btn secondary" href="https://github.com/thebeardbe/mewgenics-breeding-overlay/releases/latest/download/MewgenicsOverlay">
       🐧 Download for Linux<small>no install · Ubuntu, Arch, Fedora…</small>
@@ -149,7 +155,20 @@
     <div class="card"><h3><span class="ic">🎨</span>Film-noir UI</h3><p>Dark by default, light on demand,
       readable at a glance mid-run. Sortable columns, plain-language tooltips.</p></div>
   </div>
-  <div class="shot" style="margin-top:18px">📹 Demo video / screenshots go here — <b>coming soon</b></div>
+  <div class="shots">
+    <figure><img loading="lazy" src="/static/screenshots/breeding-dark.png"
+      alt="Breeding tab: partners ranked by risk, nightly chance, expected 7s, family distance">
+      <figcaption><b>Breeding tab</b> — pick a cat, every compatible partner ranked by risk,
+      nightly chance, expected 7s and family distance.</figcaption></figure>
+    <figure><img loading="lazy" src="/static/screenshots/donations-dark.png"
+      alt="Donations tab: which cats each NPC pays best for">
+      <figcaption><b>Donation advisor</b> — which cats each unlocked NPC pays best for,
+      and which keepers to never donate.</figcaption></figure>
+    <figure><img loading="lazy" src="/static/screenshots/breeding-light.png"
+      alt="Breeding tab in the light Noir Bright theme">
+      <figcaption><b>Theme switch</b> — the same breeding view in the light
+      “Noir · Bright” theme.</figcaption></figure>
+  </div>
 </div></section>
 
 <section id="safety"><div class="wrap">
@@ -197,7 +216,7 @@
 
 <footer><div class="wrap">
   <p><b>Mewgenics Breeding Overlay</b> — built by <a href="https://github.com/thebeardbe">TheBeardBE</a> for the community.
-  Free · MIT · read-only. <span class="pill">v0.1.46</span></p>
+  Free · MIT · read-only. <span class="pill">v{version}</span></p>
   <p>Genetics engine &amp; parser: <a href="https://github.com/frankieg33/MewgenicsBreedingManager">MewgenicsBreedingManager</a>
   (MIT) · save research: <a href="https://github.com/pzx521521/mewgenics-save-editor">pzx521521</a> &amp; the community ·
   game: <a href="https://store.steampowered.com/app/686060/">Mewgenics</a></p>

@@ -12,15 +12,18 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import logging
 import os
 import re
 import threading
 import time
+import urllib.request
 from pathlib import Path
 
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.staticfiles import StaticFiles
 
 import llm
 import store
@@ -31,6 +34,9 @@ app = FastAPI(title="Bugbox")
 logger = logging.getLogger("bugbox")
 
 TEMPLATES = Path(__file__).parent / "templates"
+STATIC_DIR = Path(__file__).parent / "static"
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR), check_dir=False),
+          name="static")
 ADMIN_USER = os.environ.get("BGBOX_ADMIN_USER", "admin")
 ADMIN_PASS = os.environ.get("BGBOX_ADMIN_PASS", "")
 COOKIE_KEY = os.environ.get("BGBOX_COOKIE_KEY", "change-me")
@@ -110,10 +116,66 @@ def _render(name: str, **ctx) -> HTMLResponse:
     return HTMLResponse(html)
 
 
+# ── latest-overlay-version (for the download buttons / version pill) ───────
+# The buttons already hit /releases/latest/download/... (always newest); only
+# the *displayed* version is dynamic. Fetched once per TTL from the GitHub
+# releases API and refreshed lazily in the background so page loads never
+# block on the network; falls back to the last known value (env or a baked
+# default) when the API is unreachable or rate-limited.
+_VERSION_URL = ("https://api.github.com/repos/thebeardbe/"
+                "mewgenics-breeding-overlay/releases/latest")
+_DEFAULT_VERSION = os.environ.get("BGBOX_OVERLAY_VERSION", "0.1.46")
+_VERSION_TTL = 300.0
+_version_cache = {"version": _DEFAULT_VERSION, "ts": 0.0}
+_version_lock = threading.Lock()
+_version_refreshing = False
+
+
+def _fetch_github_version() -> str:
+    """Fetch the newest overlay release tag (e.g. '0.1.46'); best-effort."""
+    try:
+        req = urllib.request.Request(
+            _VERSION_URL,
+            headers={"User-Agent": "bugbox-landing",
+                     "Accept": "application/vnd.github+json"},
+        )
+        with urllib.request.urlopen(req, timeout=4) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        tag = str(data.get("tag_name") or "").lstrip("v")
+        if re.fullmatch(r"\d+\.\d+\.\d+", tag):
+            return tag
+    except Exception:
+        pass
+    return _version_cache["version"]
+
+
+def latest_version() -> str:
+    """Cached overlay version; refreshes in the background when stale."""
+    global _version_refreshing
+    now = time.time()
+    with _version_lock:
+        stale = now - _version_cache["ts"] > _VERSION_TTL
+        if stale and not _version_refreshing:
+            _version_refreshing = True
+
+            def _refresh():
+                global _version_refreshing
+                try:
+                    v = _fetch_github_version()
+                    with _version_lock:
+                        _version_cache["version"] = v
+                        _version_cache["ts"] = time.time()
+                finally:
+                    _version_refreshing = False
+
+            threading.Thread(target=_refresh, daemon=True).start()
+        return _version_cache["version"]
+
+
 # ── public surface ────────────────────────────────────────────────────────
 @app.get("/", response_class=HTMLResponse)
 def home():
-    return _render("index.html")
+    return _render("index.html", version=latest_version())
 
 
 @app.get("/report", response_class=HTMLResponse)
