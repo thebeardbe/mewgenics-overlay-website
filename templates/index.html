@@ -27,13 +27,17 @@
   nav .links a:hover { color:var(--text); text-decoration:none; }
 
   /* hero */
-  .hero { padding:72px 0 40px; text-align:center;
+  .hero { padding:56px 0 48px; text-align:center;
           background:
-            linear-gradient(rgba(20,18,15,.86), rgba(20,18,15,.93)),
+            linear-gradient(rgba(20,18,15,.76), rgba(20,18,15,.9)),
             url('/static/screenshots/breeding-dark.png') center 25%/cover no-repeat,
             var(--bg);
           border-bottom:1px solid var(--line); }
   .hero .wrap { position:relative; z-index:1; }
+  .hero .panel { max-width:760px; margin:0 auto; padding:30px 32px 26px;
+          background:rgba(16,14,11,.8); border:1px solid var(--line);
+          border-radius:18px; box-shadow:0 12px 48px rgba(0,0,0,.5); }
+  .hero .panel .tag { color:#cfc9bc; }
   .hero h1 { font-size:42px; line-height:1.15; margin:0 0 14px; }
   .hero h1 .hl { color:var(--accent2); }
   .hero p.tag { color:var(--muted); font-size:19px; max-width:640px; margin:0 auto 34px; }
@@ -68,10 +72,6 @@
           border-radius:12px; color:var(--muted); text-align:center; padding:20px;
           background:repeating-linear-gradient(45deg,var(--card),var(--card) 14px,
           var(--card2) 14px,var(--card2) 28px); font-size:14px; }
-  .shot { display:grid; place-items:center; min-height:200px; border:1px dashed var(--line);
-          border-radius:12px; color:var(--muted); text-align:center; padding:20px;
-          background:repeating-linear-gradient(45deg,var(--card),var(--card) 14px,
-          var(--card2) 14px,var(--card2) 28px); font-size:14px; }
   .shots { display:grid; gap:16px; margin-top:18px; }
   .shots figure { margin:0; border:1px solid var(--line); border-radius:12px;
           overflow:hidden; background:var(--card); }
@@ -93,6 +93,10 @@
   footer a { color:var(--muted); text-decoration:underline; }
   .pill { display:inline-block; background:var(--card2); border:1px solid var(--line);
           color:var(--muted); font-size:12px; padding:2px 10px; border-radius:20px; }
+  .credits { list-style:none; margin:16px auto 0; padding:0; max-width:760px;
+          text-align:left; display:grid; gap:5px; }
+  .credits li { line-height:1.55; }
+  .credits b { color:var(--text); font-weight:600; }
   @media (max-width:640px){ .hero h1{font-size:30px;} .hero{padding:44px 0 26px;} }
 </style>
 </head>
@@ -112,23 +116,25 @@
 </div></header>
 
 <div class="hero"><div class="wrap">
-  <h1>Breed <span class="hl">smarter</span> in Mewgenics.<br>Never gamble a litter again.</h1>
-  <p class="tag">Pick any cat and get every compatible partner ranked live: risk, chance
-  per night, expected 7s, family distance and blocked-pair reasons, right on top of your game.</p>
-  <div class="buttons">
-    <!-- version text is fetched live from the latest GitHub release -->
-    <a class="btn primary" href="https://github.com/thebeardbe/mewgenics-breeding-overlay/releases/latest/download/MewgenicsOverlay.exe">
-      ⬇️ Download for Windows<small>MewgenicsOverlay.exe · v{version}</small>
-    </a>
-    <a class="btn secondary" href="https://github.com/thebeardbe/mewgenics-breeding-overlay/releases/latest/download/MewgenicsOverlay">
-      🐧 Download for Linux<small>no installer · download, chmod +x, run</small>
-    </a>
-  </div>
-  <p class="alt">NixOS? Just run: <code>nix run github:thebeardbe/mewgenics-breeding-overlay</code></p>
-  <div class="badges">
-    <span>🔒 Read-only: <b>never touches your save</b></span>
-    <span>🧬 Built on MBM's genetics engine</span>
-    <span>🧡 Free &amp; open source (MIT)</span>
+  <div class="panel">
+    <h1>Breed <span class="hl">smarter</span> in Mewgenics.<br>Never gamble a litter again.</h1>
+    <p class="tag">Pick any cat and get every compatible partner ranked live: risk, chance
+    per night, expected 7s, family distance and blocked-pair reasons, right on top of your game.</p>
+    <div class="buttons">
+      <!-- version text is fetched live from the latest GitHub release -->
+      <a class="btn primary" href="https://github.com/thebeardbe/mewgenics-breeding-overlay/releases/latest/download/MewgenicsOverlay.exe">
+        ⬇️ Download for Windows<small>MewgenicsOverlay.exe · v{version}</small>
+      </a>
+      <a class="btn secondary" href="https://github.com/thebeardbe/mewgenics-breeding-overlay/releases/latest/download/MewgenicsOverlay">
+        🐧 Download for Linux<small>no installer · download, chmod +x, run</small>
+      </a>
+    </div>
+    <p class="alt">NixOS? Just run: <code>nix run github:thebeardbe/mewgenics-breeding-overlay</code></p>
+    <div class="badges">
+      <span>🔒 Read-only: <b>never touches your save</b></span>
+      <span>🧬 Built on MBM's genetics engine</span>
+      <span>🧡 Free &amp; open source (MIT)</span>
+    </div>
   </div>
 </div></div>
 
@@ -182,15 +188,9 @@
 </div></section>
 
 <section id="safety"><div class="wrap">
-  <h2>Is it safe? Yes.</h2>
-  <p class="sub">The short answer: it cannot hurt your save, your game or your account.</p>
-  <p>The overlay only <b>reads</b>. It opens a copy of your save file the way a text editor opens a
-    document, and there is no code path that writes to the game or uploads anything. It does not hook
-    the game process, and it contains <b>no network code</b>: while you play it never talks to the
-    internet, and the only time your browser opens is when <i>you</i> click the Report button in the
-    About box. Every release also runs a test that fingerprints a save before and after an engine pass
-    and requires the two to be byte-identical. If you still prefer not to trust the binary, the source
-    is MIT licensed and the README explains how to build it yourself.</p>
+  <h2>Is it safe? Is it accurate?</h2>
+  <p class="sub">Yes to both: read-only by design, and every number it shows is pinned to the
+    game's own datamined code. Here is the proof for each claim.</p>
   <div class="grid">
     <div class="card"><h3>🔒 Read-only</h3><p>The overlay parses <b>copies</b> of your save and opens
       SQLite in read-only mode. It never writes, patches or uploads anything.</p></div>
@@ -200,6 +200,25 @@
       Nothing leaves your machine unless you open a link yourself.</p></div>
     <div class="card"><h3>📄 Open source</h3><p>MIT licensed with the full source on GitHub,
       pinned by automated tests, and buildable from source if you want to verify it yourself.</p></div>
+  </div>
+  <h3 style="margin:34px 0 4px">Where the numbers come from</h3>
+  <div class="grid">
+    <div class="card"><h3>🧬 Genetics engine</h3><p>The save parser and genetics
+      engine are vendored from
+      <a href="https://github.com/frankieg33/MewgenicsBreedingManager">MewgenicsBreedingManager</a>
+      (MIT), synced to the
+      <a href="https://github.com/whyayala/MewgenicsBreedingManager">maintained fork by whyayala</a>
+      for the game's 1.1 breeding model.</p></div>
+    <div class="card"><h3>📐 Datamined formulas</h3><p>All breeding math comes from
+      <a href="https://mewgenicswiki.org/tools/breeding-calculator">SciresM's reverse engineering
+      of the game</a> (glaiel::CatData::breed), the only public source derived from actual game code.</p></div>
+    <div class="card"><h3>🔬 Cross-checked tables</h3><p>Every formula is checked a second time
+      against <a href="https://mewgenics.wiki.gg/wiki/Breeding">wiki.gg's datamined Breeding
+tables</a> (stat inheritance, disorders, birth defects, sexuality, compatibility).</p></div>
+    <div class="card"><h3>🧪 Test-pinned</h3><p>
+      <a href="https://github.com/thebeardbe/mewgenics-breeding-overlay/blob/main/tests/test_wiki_math.py">
+      tests/test_wiki_math.py</a> pins each formula to those sources, and a save-safety test requires
+      a save to be byte-identical after an engine pass. A drift from the game data fails CI.</p></div>
   </div>
 </div></section>
 
@@ -237,9 +256,26 @@
   <p>Developed with coding assistance from an AI, via <a href="https://pi.dev">pi.dev</a>. To be clear: the
     AI is a helper, not the author. The design, the testing and every decision are human, and the code is
     reviewed before it ships.</p>
-  <p>Genetics engine &amp; parser: <a href="https://github.com/frankieg33/MewgenicsBreedingManager">MewgenicsBreedingManager</a>
-  (MIT) · save research: <a href="https://github.com/pzx521521/mewgenics-save-editor">pzx521521</a> &amp; the community ·
-  game: <a href="https://store.steampowered.com/app/686060/">Mewgenics</a></p>
+  <p style="margin-top:18px"><b>Credits &amp; sources</b></p>
+  <ul class="credits">
+    <li><b>Mewgenics</b>: <a href="https://store.steampowered.com/app/686060/">the game</a>, by Edmund
+      McMillen &amp; Tyler Glaiel (Team Meat / Glaiel Games).</li>
+    <li><b>Save parser &amp; genetics engine</b>: <a href="https://github.com/frankieg33/MewgenicsBreedingManager">
+      MewgenicsBreedingManager</a> by frankieg33 (MIT), vendored and synced to the
+      <a href="https://github.com/whyayala/MewgenicsBreedingManager">maintained fork by whyayala</a>
+      (v5.9.5) for the game-1.1 breeding model.</li>
+    <li><b>Datamined breeding formulas</b>: SciresM's reverse engineering of the game's breed code,
+      published via the
+      <a href="https://mewgenicswiki.org/tools/breeding-calculator">Mewgenics breeding calculator</a>
+      and the <a href="https://gist.github.com/SciresM/95a9dbba22937420e75d4da617af1397">original
+      analysis notes</a>.</li>
+    <li><b>Cross-check tables</b>: <a href="https://mewgenics.wiki.gg/wiki/Breeding">Mewgenics Wiki
+      (wiki.gg)</a>, datamined tables from the game binary.</li>
+    <li><b>Save format research</b>: <a href="https://github.com/pzx521521/mewgenics-save-editor">
+      pzx521521/mewgenics-save-editor</a> and the Mewgenics community.</li>
+    <li><b>This site &amp; Bugbox</b>: <a href="https://github.com/thebeardbe/mewgenics-overlay-website">source</a>;
+      coding assistance via <a href="https://pi.dev">pi.dev</a>.</li>
+  </ul>
 </div></footer>
 
 </body>
