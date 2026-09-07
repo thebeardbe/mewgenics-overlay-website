@@ -5,50 +5,87 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>People · Bugbox</title>
 <style>
-  :root { --bg:#171614; --card:#24211d; --line:#3a3731; --text:#e8e4dc;
-          --muted:#a49f92; --accent:#c62828; --good:#4caf50; --warn:#b26b0a; }
+  :root { --bg:#171614; --card:#24211d; --card2:#2c2822; --line:#3a3731;
+          --text:#e8e4dc; --muted:#a49f92; --accent:#c62828; --good:#81c784;
+          --warn:#e0a458; --purple:#c7b8e8; }
   * { box-sizing:border-box; }
   body { margin:0; background:var(--bg); color:var(--text);
-         font:15px/1.5 system-ui, sans-serif; padding:24px; }
-  h1 { font-size:20px; margin:0 0 4px; }
-  .sub { color:var(--muted); margin-bottom:16px; }
+         font:15px/1.5 system-ui, sans-serif; }
+  .app { display:grid; grid-template-columns:220px 1fr; min-height:100vh; }
+  a { color:var(--purple); text-decoration:none; }
+
+  aside { background:#121110; border-right:1px solid var(--line);
+          padding:18px 12px; display:flex; flex-direction:column; gap:2px; }
+  aside .brand { font-size:17px; font-weight:700; padding:4px 10px 14px; }
+  aside .group { color:var(--muted); font-size:10px; text-transform:uppercase;
+          letter-spacing:.08em; padding:12px 10px 4px; }
+  aside a { display:flex; align-items:center; gap:8px; padding:7px 10px;
+          border-radius:8px; color:#d6d2c8; }
+  aside a:hover { background:var(--card2); text-decoration:none; }
+  aside a.active { background:var(--accent); color:#fff; font-weight:600; }
+  aside .spacer { flex:1; }
+  aside a.out { color:var(--muted); }
+
+  main { padding:22px 26px; min-width:0; }
+  main h1 { font-size:21px; margin:0 0 2px; }
+  main .sub { color:var(--muted); margin:0 0 16px; max-width:760px; }
   .card { background:var(--card); border:1px solid var(--line); border-radius:10px;
-          padding:16px; margin-bottom:14px; }
+          padding:16px; margin-bottom:14px; max-width:760px; }
   .add { display:flex; gap:8px; margin-bottom:4px; }
   .add input { flex:1; padding:8px 10px; border:1px solid var(--line);
           border-radius:8px; background:#171614; color:var(--text); }
   .btn { background:#2e2a24; color:var(--text); border:1px solid var(--line);
          border-radius:6px; padding:6px 12px; cursor:pointer; }
-  .btn.ok { color:#81c784; } .btn.no { color:#ff8a8a; }
+  .btn.ok { color:var(--good); } .btn.no { color:#ff8a8a; }
   .tag { font-size:11px; padding:1px 8px; border-radius:10px; text-transform:uppercase; }
   .tag.owner { background:#3a2f16; color:#e6c874; }
-  .tag.approved { background:#1d3a24; color:#81c784; }
+  .tag.approved { background:#1d3a24; color:var(--good); }
   .tag.pending { background:#3a2f16; color:#e6c874; }
   .tag.denied { background:#3a1518; color:#ff8a8a; }
-  .row { display:flex; gap:14px; align-items:center; flex-wrap:wrap; padding:6px 0;
+  .row { display:flex; gap:14px; align-items:center; flex-wrap:wrap; padding:8px 0;
          border-top:1px solid var(--line); }
   .row:first-child { border-top:0; }
   .row .name { font-weight:600; min-width:140px; }
   .row .meta { color:var(--muted); font-size:12px; flex:1; }
   .row .actions { display:flex; gap:6px; }
+
+  @media (max-width:720px) {
+    .app { grid-template-columns:1fr; }
+    aside { flex-direction:row; flex-wrap:wrap; align-items:center; }
+    aside .brand, aside .spacer, aside .group { display:none; }
+  }
 </style>
 </head>
 <body>
-  <h1>🐞 Bugbox · People</h1>
-  <div class="sub">Developer access. New GitHub sign-ins arrive as <b>pending</b> and stay locked
-    until you approve them. Revoking or denying a user signs them out immediately.
-    <a href="/admin" style="color:#c7b8e8;margin-left:8px">← tickets</a></div>
+<div class="app">
+  <aside>
+    <div class="brand">🐞 Bugbox</div>
+    <div class="group">Tickets</div>
+    <a href="/admin">📥 Tickets</a>
+    <a href="/admin/people" class="active">👥 People</a>
+    <div class="spacer"></div>
+    <div class="group">Account</div>
+    <a href="/report" class="out">📝 Public report page</a>
+    <a href="/logout" class="out">↪ Sign out</a>
+  </aside>
 
-  <div class="card">
-    <p style="margin:0 0 8px;color:var(--muted)">Pre-approve a GitHub login (they can sign in the
-      moment they connect, no waiting):</p>
-    <div class="add">
-      <input id="gh_login" placeholder="github username" autocomplete="off">
-      <button class="btn ok" onclick="addUser()">Pre-approve</button>
+  <main>
+    <h1>👥 People</h1>
+    <p class="sub">Developer access. New GitHub sign-ins arrive as <b>pending</b> and stay locked
+      until you approve them. Revoking or denying a user signs them out immediately.</p>
+
+    <div class="card">
+      <p style="margin:0 0 8px;color:var(--muted)">Pre-approve a GitHub login (they can sign in
+        the moment they connect, no waiting):</p>
+      <div class="add">
+        <input id="gh_login" placeholder="github username" autocomplete="off">
+        <button class="btn ok" onclick="addUser()">Pre-approve</button>
+      </div>
     </div>
-  </div>
 
-  <div id="list" class="card" style="padding:6px 16px"></div>
+    <div id="list" class="card" style="padding:6px 16px"></div>
+  </main>
+</div>
 
 <script>
 async function load() {
@@ -97,7 +134,7 @@ async function load() {
 async function addUser() {
   const login = document.getElementById("gh_login").value.trim();
   if (!login) return;
-  const r = await fetch("/api/users/github", {
+  await fetch("/api/users/github", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: "login=" + encodeURIComponent(login),

@@ -5,17 +5,37 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Bugbox · admin</title>
 <style>
-  :root { --bg:#171614; --card:#24211d; --line:#3a3731; --text:#e8e4dc;
-          --muted:#a49f92; --accent:#c62828; --good:#2e7d32; --warn:#b26b0a; }
+  :root { --bg:#171614; --card:#24211d; --card2:#2c2822; --line:#3a3731;
+          --text:#e8e4dc; --muted:#a49f92; --accent:#c62828; --good:#81c784;
+          --warn:#e0a458; --purple:#c7b8e8; }
   * { box-sizing:border-box; }
   body { margin:0; background:var(--bg); color:var(--text);
-         font:15px/1.5 system-ui, sans-serif; padding:24px; }
-  h1 { font-size:20px; margin:0 0 4px; }
-  .sub { color:var(--muted); margin-bottom:16px; }
-  .filters { margin-bottom:16px; }
-  .filters button { background:var(--card); color:var(--text); border:1px solid var(--line);
-         border-radius:6px; padding:6px 12px; margin-right:6px; cursor:pointer; }
-  .filters button.active { border-color:var(--accent); }
+         font:15px/1.5 system-ui, sans-serif; }
+  .app { display:grid; grid-template-columns:220px 1fr; min-height:100vh; }
+  a { color:var(--purple); text-decoration:none; }
+
+  /* sidebar */
+  aside { background:#121110; border-right:1px solid var(--line);
+          padding:18px 12px; display:flex; flex-direction:column; gap:2px; }
+  aside .brand { font-size:17px; font-weight:700; padding:4px 10px 14px; }
+  aside .group { color:var(--muted); font-size:10px; text-transform:uppercase;
+          letter-spacing:.08em; padding:12px 10px 4px; }
+  aside a { display:flex; align-items:center; gap:8px; padding:7px 10px;
+          border-radius:8px; color:#d6d2c8; }
+  aside a:hover { background:var(--card2); text-decoration:none; }
+  aside a.active { background:var(--accent); color:#fff; font-weight:600; }
+  aside a .cnt { margin-left:auto; font-size:11px; color:var(--muted);
+          background:var(--card); border-radius:10px; padding:0 7px; }
+  aside a.active .cnt { color:#fff; background:rgba(255,255,255,.18); }
+  aside .spacer { flex:1; }
+  aside a.out { color:var(--muted); }
+
+  main { padding:22px 26px; min-width:0; }
+  main h1 { font-size:21px; margin:0 0 2px; }
+  main .sub { color:var(--muted); margin:0 0 16px; }
+  .search { width:100%; max-width:420px; padding:8px 12px; margin-bottom:16px;
+          background:#0f0e0c; color:var(--text); border:1px solid var(--line);
+          border-radius:8px; }
   .ticket { background:var(--card); border:1px solid var(--line); border-radius:10px;
          padding:14px 16px; margin-bottom:12px; }
   .ticket .top { display:flex; gap:10px; align-items:baseline; flex-wrap:wrap; }
@@ -28,7 +48,7 @@
   .title { font-weight:600; }
   .meta { color:var(--muted); font-size:12px; margin:4px 0 8px; }
   .summary { margin:4px 0; }
-  .cause { color:#c7b8e8; font-size:13px; }
+  .cause { color:var(--purple); font-size:13px; }
   .cat { font-size:11px; color:var(--muted); border:1px solid var(--line);
          padding:0 6px; border-radius:4px; }
   .details { display:none; margin-top:10px; white-space:pre-wrap;
@@ -37,47 +57,99 @@
          padding:10px; max-height:260px; overflow:auto; }
   .actions button { background:#2e2a24; border:1px solid var(--line); color:var(--text);
          border-radius:6px; padding:4px 10px; margin-right:6px; cursor:pointer; }
+  .actions button.ok { color:var(--good); }
   .actions button.del { color:#ff8a8a; }
   .empty { color:var(--muted); text-align:center; padding:40px 0; }
   .status-tag { font-size:11px; padding:1px 8px; border-radius:10px;
          background:var(--line); }
-  a.toggle { color:#c7b8e8; cursor:pointer; font-size:13px; }
+  a.toggle { color:var(--purple); cursor:pointer; font-size:13px; }
+
+  @media (max-width:720px) {
+    .app { grid-template-columns:1fr; }
+    aside { flex-direction:row; flex-wrap:wrap; align-items:center; }
+    aside .brand, aside .spacer { display:none; }
+    aside .group { display:none; }
+  }
 </style>
 </head>
 <body>
-  <h1>🐞 Bugbox</h1>
-  <div class="sub">LLM-triaged bug reports for Mewgenics Breeding Overlay
+<div class="app">
+  <aside>
+    <div class="brand">🐞 Bugbox</div>
+    <div class="group">Tickets</div>
+    <a href="#" data-s="" class="active">📥 All <span class="cnt" id="cnt-all"></span></a>
+    <a href="#" data-s="open">🟠 Open <span class="cnt" id="cnt-open"></span></a>
+    <a href="#" data-s="triaged">🏷️ Triaged <span class="cnt" id="cnt-triaged"></span></a>
+    <a href="#" data-s="fixed">✅ Fixed <span class="cnt" id="cnt-fixed"></span></a>
+    <a href="#" data-s="wontfix">🚫 Won't fix <span class="cnt" id="cnt-wontfix"></span></a>
+    <a href="#" data-s="duplicate">🔁 Duplicates <span class="cnt" id="cnt-duplicate"></span></a>
     {people_link}
-    <a href="/logout" style="color:var(--muted);font-size:12px;float:right">sign out</a></div>
-  <div class="filters">
-    <button data-s="" class="active">All</button>
-    <button data-s="open">Open</button>
-    <button data-s="triaged">Triaged</button>
-    <button data-s="fixed">Fixed</button>
-    <button data-s="wontfix">Won't fix</button>
-    <button data-s="duplicate">Duplicates</button>
-  </div>
-  <div id="list"></div>
+    <div class="spacer"></div>
+    <div class="group">Account</div>
+    <a href="/report" class="out">📝 Public report page</a>
+    <a href="/logout" class="out">↪ Sign out</a>
+  </aside>
+
+  <main>
+    <h1>🐞 Bugbox</h1>
+    <p class="sub" id="heading">Reports for Mewgenics Breeding Overlay</p>
+    <input class="search" id="search" type="search"
+           placeholder="Search titles, bodies, names, logs…" autocomplete="off">
+    <div id="list"></div>
+  </main>
+</div>
 
 <script>
 const el = document.getElementById("list");
+const searchEl = document.getElementById("search");
+let tickets = [];
 let current = "";
 
-document.querySelectorAll(".filters button").forEach(b =>
-  b.addEventListener("click", () => {
-    document.querySelectorAll(".filters button").forEach(x => x.classList.remove("active"));
-    b.classList.add("active");
-    current = b.dataset.s;
-    load();
-  }));
+function esc(s) {
+  return (s || "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;",
+    ">": "&gt;", '"': "&quot;" }[c]));
+}
+function ago(ts) {
+  const m = Math.round((Date.now() / 1000 - ts) / 60);
+  if (m < 1) return "just now";
+  if (m < 60) return m + "m ago";
+  const h = Math.round(m / 60);
+  return h < 24 ? h + "h ago" : Math.round(h / 24) + "d ago";
+}
 
 async function load() {
-  const q = current ? "?status=" + current : "";
-  const r = await fetch("/api/tickets" + q);
+  const r = await fetch("/api/tickets");
   if (r.status === 401) { location.href = "/login"; return; }
-  const tickets = await r.json();
-  if (!tickets.length) { el.innerHTML = '<div class="empty">No reports here 🐱</div>'; return; }
-  el.innerHTML = tickets.map(t => card(t)).join("");
+  tickets = await r.json();
+  // status counts for the sidebar
+  const counts = { "": tickets.length };
+  tickets.forEach(t => counts[t.status] = (counts[t.status] || 0) + 1);
+  document.querySelectorAll("aside a[data-s]").forEach(a => {
+    const c = document.getElementById("cnt-" + (a.dataset.s || "all"));
+    if (c) c.textContent = counts[a.dataset.s] || 0;
+  });
+  render();
+}
+
+function visible() {
+  const q = searchEl.value.trim().toLowerCase();
+  return tickets.filter(t => {
+    if (current && t.status !== current) return false;
+    if (!q) return true;
+    return [t.title, t.body, t.log, t.name, t.id, t.app_version]
+      .join(" ").toLowerCase().includes(q);
+  });
+}
+
+function render() {
+  const rows = visible();
+  document.getElementById("heading").textContent =
+    (current ? current : "all") + " · " + rows.length + " report(s)";
+  if (!rows.length) {
+    el.innerHTML = '<div class="empty">No reports here 🐱</div>';
+    return;
+  }
+  el.innerHTML = rows.map(card).join("");
   el.querySelectorAll(".toggle").forEach(a => a.onclick = () => {
     const d = a.parentElement.parentElement.querySelector(".details");
     const show = d.style.display !== "block";
@@ -96,17 +168,6 @@ async function load() {
   });
 }
 
-function esc(s) {
-  return (s || "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;",
-    ">": "&gt;", '"': "&quot;" }[c]));
-}
-function ago(ts) {
-  const m = Math.round((Date.now() / 1000 - ts) / 60);
-  if (m < 1) return "just now";
-  if (m < 60) return m + "m ago";
-  const h = Math.round(m / 60);
-  return h < 24 ? h + "h ago" : Math.round(h / 24) + "d ago";
-}
 function card(t) {
   const a = t.analysis || {};
   const dupes = (a.dupe_ids || []).length
@@ -137,6 +198,15 @@ ${esc((t.log || "").slice(-4000))}</div>
     </div>
   </div>`;
 }
+
+document.querySelectorAll("aside a[data-s]").forEach(a => a.onclick = e => {
+  e.preventDefault();
+  document.querySelectorAll("aside a").forEach(x => x.classList.remove("active"));
+  a.classList.add("active");
+  current = a.dataset.s;
+  render();
+});
+searchEl.addEventListener("input", render);
 load();
 </script>
 </body>

@@ -414,8 +414,7 @@ def admin_page(request: Request):
     user = _current_user(request)
     if user is None:
         return RedirectResponse("/login")
-    people_link = ('<a href="/admin/people" style="color:var(--muted);'
-                   'font-size:12px;margin-left:12px">People</a>'
+    people_link = ('<a href="/admin/people">👥 People</a>'
                    if user.get("role") == "owner" else "")
     return _render("admin.html", people_link=people_link)
 

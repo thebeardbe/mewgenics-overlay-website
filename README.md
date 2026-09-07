@@ -100,3 +100,8 @@ and reports still land in the admin queue.
 
 Data lives in a SQLite volume (`bugbox-data`); back it up with the rest of
 your server.
+
+**Demo data:** `python seed_demo.py` seeds ~20 realistic tickets in every status so
+you can preview the admin UI. It refuses to run when reports already exist
+(`--force` wipes and reseeds; inside the container:
+`docker compose exec bugbox python seed_demo.py --force`).
