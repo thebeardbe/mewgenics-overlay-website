@@ -453,6 +453,21 @@ def api_delete(request: Request, rid: str):
     return {"ok": True}
 
 
+@app.post("/api/tickets/{rid}/link")
+def api_ticket_link(request: Request, rid: str, target: str = Form("")):
+    """Link two reports as related (bidirectional)."""
+    if _current_user(request) is None:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    target = target.strip()
+    if not target or target == rid:
+        return JSONResponse({"error": "pick another ticket id"},
+                            status_code=400)
+    if store.get_report(target) is None or store.get_report(rid) is None:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    store.link_reports(rid, target)
+    return {"ok": True}
+
+
 # ── people management (owner only) ────────────────────────────────────────
 def _require_owner(request: Request):
     user = _current_user(request)

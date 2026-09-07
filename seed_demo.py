@@ -22,7 +22,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from store import DB_PATH, DATA_DIR, init  # noqa: E402
+from store import DB_PATH, DATA_DIR, init, link_reports  # noqa: E402
 
 # (title, category, status, severity, name, age_days, body, log, app_version,
 #  game_patch, dupe_of, summary, likely_cause)
@@ -152,7 +152,7 @@ SEVERITIES = ["low", "medium", "high", "critical"]
 CATEGORIES = ["parser", "save", "crash", "ui", "breeding", "donations", "other"]
 
 
-def main() -> int:
+def _main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--force", action="store_true",
                     help="wipe existing reports before seeding")
@@ -197,6 +197,13 @@ def main() -> int:
              json.dumps(analysis, ensure_ascii=False)),
         )
     conn.commit()
+    conn.close()
+    # point the duplicate reports at their main tickets so the demo shows the
+    # new related-links UI
+    link_reports("demo14", "demo02")
+    link_reports("demo15", "demo05")
+    link_reports("demo16", "demo03")
+    conn = sqlite3.connect(DB_PATH)
     counts = {s: conn.execute(
         "SELECT COUNT(*) FROM reports WHERE status = ?", (s,)).fetchone()[0]
         for s in STATUS_ORDER}
@@ -206,4 +213,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(_main())

@@ -45,10 +45,16 @@ def init() -> None:
                 log TEXT NOT NULL DEFAULT '',
                 app_version TEXT NOT NULL DEFAULT '',
                 game_patch TEXT NOT NULL DEFAULT '',
-                analysis TEXT NOT NULL DEFAULT '{}'
+                analysis TEXT NOT NULL DEFAULT '{}',
+                related TEXT NOT NULL DEFAULT '[]'
             )
             """
         )
+        # migrate older databases that predate the related-links column
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(reports)")]
+        if "related" not in cols:
+            conn.execute(
+                "ALTER TABLE reports ADD COLUMN related TEXT NOT NULL DEFAULT '[]'")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS users (
@@ -122,6 +128,14 @@ def set_analysis(rid: str, analysis: dict) -> None:
         )
 
 
+def _json_list(value, default):
+    try:
+        data = json.loads(value) if value else default
+    except ValueError:
+        return default
+    return data if isinstance(data, list) else default
+
+
 def list_reports(status: str | None = None, limit: int = 200) -> list[dict]:
     q = "SELECT * FROM reports"
     args: list = []
@@ -139,6 +153,7 @@ def list_reports(status: str | None = None, limit: int = 200) -> list[dict]:
             d["analysis"] = json.loads(d.get("analysis") or "{}")
         except ValueError:
             d["analysis"] = {}
+        d["related"] = _json_list(d.get("related"), [])
         out.append(d)
     return out
 
@@ -153,7 +168,25 @@ def get_report(rid: str) -> dict | None:
         d["analysis"] = json.loads(d.get("analysis") or "{}")
     except ValueError:
         d["analysis"] = {}
+    d["related"] = _json_list(d.get("related"), [])
     return d
+
+
+def link_reports(a: str, b: str) -> None:
+    """Link two reports symmetrically (duplicate/related pairing)."""
+    with _lock, _connect() as conn:
+        rows = conn.execute(
+            "SELECT id, related FROM reports WHERE id IN (?, ?)", (a, b)
+        ).fetchall()
+        rel = {r["id"]: _json_list(r["related"], []) for r in rows}
+        for rid, others in ((a, b), (b, a)):
+            lst = rel.get(rid, [])
+            if others in lst:
+                continue
+            lst.append(others)
+            conn.execute(
+                "UPDATE reports SET related = ? WHERE id = ?",
+                (json.dumps(lst[-12:], ensure_ascii=False), rid))
 
 
 def update_status(rid: str, status: str) -> None:

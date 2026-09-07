@@ -336,6 +336,38 @@ def test_pending_user_is_locked_and_revoking_kills_sessions():
         ADMIN["X-Forwarded-For"], token)).status_code == 401
 
 
+def test_link_reports_symmetrically_and_requires_auth():
+    # anonymous cannot link
+    assert client.post("/api/tickets/a/link", data={"target": "b"},
+                       headers=ADMIN).status_code == 401
+    owner = _login_client()
+    a = store.add({"title": "main crash"})
+    b = store.add({"title": "same crash, more logs"})
+    r = owner.post(f"/api/tickets/{a}/link", data={"target": b},
+                   headers=ADMIN)
+    assert r.status_code == 200
+    assert b in store.get_report(a)["related"]
+    assert a in store.get_report(b)["related"]
+    # relinking is idempotent
+    owner.post(f"/api/tickets/{a}/link", data={"target": b}, headers=ADMIN)
+    assert store.get_report(a)["related"] == [b]
+    # self-link and unknown targets are rejected
+    assert owner.post(f"/api/tickets/{a}/link", data={"target": a},
+                      headers=ADMIN).status_code == 400
+    assert owner.post(f"/api/tickets/{a}/link", data={"target": "nope"},
+                      headers=ADMIN).status_code == 404
+
+
+def test_list_reports_exposes_related():
+    a = store.add({"title": "x"})
+    b = store.add({"title": "y"})
+    store.link_reports(a, b)
+    rows = store.list_reports()
+    by_id = {r["id"]: r for r in rows}
+    assert by_id[a]["related"] == [b]
+    assert by_id[b]["related"] == [a]
+
+
 def test_access_page_states():
     assert "requested access" in client.get("/access?login=devthree").text
     assert "was denied" in client.get("/access?login=devthree&status=denied").text
@@ -354,8 +386,9 @@ def test_people_page_requires_owner():
 
 
 def test_details_toggle_targets_own_ticket():
-    # The toggle must look for .details inside the same .ticket row, not up at
-    # the list container (which made every row open the first row's details).
+    # Delegated click handler resolves .details inside the same ticket row
+    # (the old code looked two levels up and opened the first row's block).
     tpl = open("templates/admin.html", encoding="utf-8").read()
-    assert 'a.parentElement.querySelector(".details")' in tpl
+    assert 'closest("button.toggle")' in tpl
+    assert 'toggle.parentElement.querySelector(".details")' in tpl
     assert "parentElement.parentElement.querySelector" not in tpl

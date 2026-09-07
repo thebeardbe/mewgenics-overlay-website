@@ -12,7 +12,7 @@
   body { margin:0; background:var(--bg); color:var(--text);
          font:15px/1.5 system-ui, sans-serif; }
   .app { display:grid; grid-template-columns:220px 1fr; min-height:100vh; }
-  a { color:var(--purple); text-decoration:none; }
+  a { color:var(--purple); text-decoration:none; cursor:pointer; }
 
   /* sidebar */
   aside { background:#121110; border-right:1px solid var(--line);
@@ -51,18 +51,28 @@
   .cause { color:var(--purple); font-size:13px; }
   .cat { font-size:11px; color:var(--muted); border:1px solid var(--line);
          padding:0 6px; border-radius:4px; }
-  .details { display:none; margin-top:10px; white-space:pre-wrap;
+  .prev { color:var(--muted); font-size:13px; margin:4px 0; white-space:nowrap;
+          overflow:hidden; text-overflow:ellipsis; }
+  .rels { margin:6px 0 2px; font-size:12px; color:var(--muted); }
+  .rels .chip { display:inline-block; background:#2c2822; border:1px solid var(--line);
+          border-radius:12px; padding:0 9px; margin:2px 4px 0 0; cursor:pointer; }
+  .rels .chip:hover { border-color:var(--purple); color:var(--purple); }
+  .toggle { display:inline-block; margin-top:6px; background:none; border:1px solid
+          var(--line); color:var(--purple); border-radius:6px; padding:3px 10px;
+          cursor:pointer; font:inherit; font-size:13px; }
+  .toggle:hover { background:var(--card2); }
+  .details { display:none; margin-top:8px; white-space:pre-wrap;
          font-family:ui-monospace, monospace; font-size:12px; color:#d8d3c8;
          background:#171614; border:1px solid var(--line); border-radius:8px;
-         padding:10px; max-height:260px; overflow:auto; }
+         padding:10px; max-height:300px; overflow:auto; }
+  .actions { display:flex; gap:6px; margin-top:8px; flex-wrap:wrap; }
   .actions button { background:#2e2a24; border:1px solid var(--line); color:var(--text);
-         border-radius:6px; padding:4px 10px; margin-right:6px; cursor:pointer; }
+         border-radius:6px; padding:4px 10px; cursor:pointer; font:inherit; font-size:13px; }
   .actions button.ok { color:var(--good); }
   .actions button.del { color:#ff8a8a; }
   .empty { color:var(--muted); text-align:center; padding:40px 0; }
   .status-tag { font-size:11px; padding:1px 8px; border-radius:10px;
          background:var(--line); }
-  a.toggle { color:var(--purple); cursor:pointer; font-size:13px; }
 
   @media (max-width:720px) {
     .app { grid-template-columns:1fr; }
@@ -121,7 +131,6 @@ async function load() {
   const r = await fetch("/api/tickets");
   if (r.status === 401) { location.href = "/login"; return; }
   tickets = await r.json();
-  // status counts for the sidebar
   const counts = { "": tickets.length };
   tickets.forEach(t => counts[t.status] = (counts[t.status] || 0) + 1);
   document.querySelectorAll("aside a[data-s]").forEach(a => {
@@ -150,22 +159,6 @@ function render() {
     return;
   }
   el.innerHTML = rows.map(card).join("");
-  el.querySelectorAll(".toggle").forEach(a => a.onclick = () => {
-    const d = a.parentElement.querySelector(".details");
-    const show = d.style.display !== "block";
-    d.style.display = show ? "block" : "none";
-    a.textContent = show ? "hide details" : "show details";
-  });
-  el.querySelectorAll("[data-act]").forEach(btn => btn.onclick = async () => {
-    const rid = btn.dataset.id;
-    const act = btn.dataset.act;
-    await fetch(`/api/tickets/${rid}/${act === "delete" ? "delete" : "status"}`,
-      act === "delete"
-        ? { method: "POST" }
-        : { method: "POST", headers: {"Content-Type": "application/x-www-form-urlencoded"},
-            body: "status=" + act });
-    load();
-  });
 }
 
 function card(t) {
@@ -173,6 +166,10 @@ function card(t) {
   const dupes = (a.dupe_ids || []).length
     ? '<div class="cause">⚠ likely dupe of: ' + a.dupe_ids.map(x => "#" + esc(x)).join(", ") + "</div>" : "";
   const sevCls = ["low","medium","high","critical"].includes(a.severity) ? a.severity : "";
+  const preview = a.summary ? ""
+    : (t.body ? `<div class="prev">${esc(t.body.replace(/\s+/g, " ")).slice(0, 200)}${t.body.length > 200 ? "…" : ""}</div>` : "");
+  const rels = (t.related || []).length
+    ? '<div class="rels">🔗 related: ' + t.related.map(x => `<span class="chip" data-goto="${esc(x)}">#${esc(x)}</span>`).join(" ") + "</div>" : "";
   return `<div class="ticket">
     <div class="top">
       <span class="id">#${t.id}</span>
@@ -182,22 +179,71 @@ function card(t) {
       <span class="status-tag">${t.status}</span>
     </div>
     <div class="meta">${ago(t.created)} · v${esc(t.app_version || "?")} · patch ${esc(t.game_patch || "?")}${t.name ? " · " + esc(t.name) : ""}</div>
+    ${preview}
     ${a.summary ? `<div class="summary">${esc(a.summary)}</div>` : ""}
     ${a.likely_cause ? `<div class="cause">🔧 ${esc(a.likely_cause)}</div>` : ""}
     ${dupes}
-    <a class="toggle">show details</a>
+    ${rels}
+    <button class="toggle" type="button">▸ show details</button>
     <div class="details">${esc(t.body || "(no description)")}
 ${"=".repeat(30)}
-${esc((t.log || "").slice(-4000))}</div>
-    <div class="actions" style="margin-top:8px">
+${esc((t.log || "").slice(-6000))}</div>
+    <div class="actions">
       <button data-act="triaged" data-id="${t.id}">Triaged</button>
       <button data-act="fixed" data-id="${t.id}">Fixed</button>
       <button data-act="duplicate" data-id="${t.id}">Duplicate</button>
       <button data-act="wontfix" data-id="${t.id}">Won't fix</button>
+      <button data-link data-id="${t.id}">🔗 Link…</button>
       <button data-act="delete" data-id="${t.id}" class="del">Delete</button>
     </div>
   </div>`;
 }
+
+// event delegation: one listener handles toggles, links and actions
+el.addEventListener("click", async (e) => {
+  const toggle = e.target.closest("button.toggle");
+  if (toggle) {
+    const d = toggle.parentElement.querySelector(".details");
+    const show = d.style.display !== "block";
+    d.style.display = show ? "block" : "none";
+    toggle.textContent = show ? "▾ hide details" : "▸ show details";
+    return;
+  }
+  const goto = e.target.closest("[data-goto]");
+  if (goto) {
+    current = "";
+    document.querySelectorAll("aside a").forEach(x => x.classList.remove("active"));
+    document.querySelector("aside a[data-s='']").classList.add("active");
+    searchEl.value = "#" + goto.dataset.goto;
+    render();
+    return;
+  }
+  const link = e.target.closest("[data-link]");
+  if (link) {
+    const rid = link.dataset.id;
+    const target = prompt("Link this ticket to the main ticket (#id)", "");
+    if (!target) return;
+    const r = await fetch(`/api/tickets/${rid}/link`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: "target=" + encodeURIComponent(target.trim()),
+    });
+    if (!r.ok) alert("Link failed: " + (await r.json()).error);
+    load();
+    return;
+  }
+  const act = e.target.closest("[data-act]");
+  if (act) {
+    const rid = act.dataset.id;
+    const a2 = act.dataset.act;
+    await fetch(`/api/tickets/${rid}/${a2 === "delete" ? "delete" : "status"}`,
+      a2 === "delete"
+        ? { method: "POST" }
+        : { method: "POST", headers: {"Content-Type": "application/x-www-form-urlencoded"},
+            body: "status=" + a2 });
+    load();
+  }
+});
 
 document.querySelectorAll("aside a[data-s]").forEach(a => a.onclick = e => {
   e.preventDefault();
