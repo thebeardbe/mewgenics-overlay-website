@@ -80,6 +80,17 @@ is the schema the public follow-up threads (item 3) will expose — the
 privacy-rule decision there is still open (keep full body/log admin-only,
 share only typed comments + event texts publicly).
 
+## ✅ 8. Timeline actors resolve from user ids (no baked-in names)
+
+Events store the acting user's **id** (plus their login as a stable
+fallback), never the display name. Names are resolved at read time against
+`users.display_name`, so a rename in People is reflected retroactively on
+every event that user made — the log stays append-only and immutable.
+
+Machine actions are typed, not named: `actor_type` is `user`, `auto`
+(auto-triage 🤖 badge), `system` or `player`; the UI can therefore show a
+clear "auto"/system treatment instead of a person's name.
+
 ## Not currently planned
 
 - Automated notification delivery (email/push) is out of scope until the
