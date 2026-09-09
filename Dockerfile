@@ -13,4 +13,10 @@ ENV BGBOX_DATA=/data
 VOLUME /data
 EXPOSE 8000
 
+# Run as an unprivileged user (never root inside the container).
+RUN useradd --create-home --uid 10001 bugbox \
+    && mkdir -p /data \
+    && chown -R bugbox:bugbox /srv/bugbox /data
+USER bugbox
+
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]

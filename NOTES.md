@@ -103,6 +103,24 @@ clear "auto"/system treatment instead of a person's name.
   `store.exists()` gives cheap existence probes so 404 checks never drag a
   full row.
 
+## ✅ 10. Hardening round 2 (headers, CSRF, containers, logging)
+
+- **CSP split**: auth'd pages (admin/people/login) now load CSS/JS from
+  /static and get a strict CSP with no `unsafe-inline`; public pages keep a
+  baseline CSP. All responses get X-Content-Type-Options, X-Frame-Options,
+  Referrer-Policy, Permissions-Policy (camera/mic/geo/payment/usb off),
+  X-Robots-Tag noindex, and HSTS when BGBOX_HTTPS=1.
+- **CSRF origin gate**: state-changing POST/PUT/PATCH/DELETE requests with a
+  cross-origin `Origin` are rejected 403 (same-origin by default;
+  BGBOX_ORIGINS allow-list optional).
+- **Startup warnings** for short/placeholder BGBOX_ADMIN_PASS (>=12 chars).
+- **Docker runs as an unprivileged user** (uid 10001), not root.
+- **Log hardening**: optional rotating log (BGBOX_LOG_FILE) with secrets
+  scrubbed from records.
+- Static assets: templates no longer inline CSS/JS on auth pages
+  (strict-CSP requirement); tests cover headers, CSP split, CSRF gate,
+  static serving, and no-inline invariants.
+
 ## Not currently planned
 
 - Automated notification delivery (email/push) is out of scope until the

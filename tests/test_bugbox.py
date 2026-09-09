@@ -171,9 +171,9 @@ def test_llm_output_is_sanitized():
 
 
 def test_dupe_ids_are_escaped_in_admin_html():
-    template = open("templates/admin.html", encoding="utf-8").read()
+    js = open("static/js/admin.js", encoding="utf-8").read()
     # dupe ids must go through esc() so a hostile id can never become markup.
-    assert '.map(x => "#" + esc(x))' in template
+    assert '.map(x => "#" + esc(x))' in js
 
 
 def test_status_and_delete_require_auth_and_work():
@@ -389,10 +389,10 @@ def test_people_page_requires_owner():
 def test_details_toggle_targets_own_ticket():
     # Delegated click handler resolves .details inside the same ticket row
     # (the old code looked two levels up and opened the first row's block).
-    tpl = open("templates/admin.html", encoding="utf-8").read()
-    assert 'closest("button.toggle")' in tpl
-    assert 'toggle.parentElement.querySelector(".details")' in tpl
-    assert "parentElement.parentElement.querySelector" not in tpl
+    js = open("static/js/admin.js", encoding="utf-8").read()
+    assert 'closest("button.toggle")' in js
+    assert 'toggle.parentElement.querySelector(".details")' in js
+    assert "parentElement.parentElement.querySelector" not in js
 
 
 # ── admin-editable tags + comments ────────────────────────────────────────
@@ -576,3 +576,57 @@ def test_no_select_star_and_no_password_leak():
     logged = _login_client()
     for u in logged.get("/api/users", headers=ADMIN).json():
         assert "password_hash" not in u
+
+
+# ── hardening: CSP split, CSRF origin gate, static assets ──────────────────
+def test_security_headers_and_csp_split():
+    pub = client.get("/report")
+    assert pub.status_code == 200
+    csp_pub = pub.headers["content-security-policy"]
+    assert "frame-ancestors 'none'" in csp_pub
+    assert "'unsafe-inline'" in csp_pub        # public page: inline styles ok
+    for h in ("x-content-type-options", "x-frame-options",
+              "referrer-policy", "x-robots-tag", "permissions-policy"):
+        assert h in pub.headers, h
+    auth = client.get("/login")                 # strict page (no inline allowed)
+    assert auth.status_code == 200
+    csp_auth = auth.headers["content-security-policy"]
+    assert "script-src 'self'" in csp_auth
+    assert "'unsafe-inline'" not in csp_auth
+    assert client.get("/").headers.get("strict-transport-security") is None
+
+
+def test_hsts_when_https_enabled(monkeypatch):
+    import importlib
+    monkeypatch.setenv("BGBOX_HTTPS", "1")
+    import app as app2
+    importlib.reload(app2)
+    try:
+        r = client.get("/")
+        assert "strict-transport-security" in r.headers
+    finally:
+        monkeypatch.delenv("BGBOX_HTTPS", raising=False)
+        importlib.reload(app2)
+
+
+def test_csrf_origin_gate():
+    data = {"category": "ui", "title": "csrf probe", "body": "x"}
+    evil = {"X-Forwarded-For": "10.0.0.9",
+            "Origin": "https://evil.example"}
+    assert client.post("/submit", data=data, headers=evil).status_code == 403
+    same = {"X-Forwarded-For": "10.0.0.9", "Origin": "http://testserver"}
+    assert client.post("/submit", data=data, headers=same).status_code == 200
+
+
+def test_static_admin_assets_are_served():
+    for path in ("/static/css/admin.css", "/static/js/admin.js",
+                 "/static/css/login.css", "/static/js/people.js"):
+        r = client.get(path)
+        assert r.status_code == 200, path
+        assert r.headers["content-type"].startswith(("text/css", "text/javascript",
+                                                     "application/javascript"))
+    # auth'd pages no longer inline any CSS/JS (strict CSP requirement)
+    for name in ("admin.html", "people.html", "login.html"):
+        text = open(f"templates/{name}", encoding="utf-8").read()
+        assert "<style>" not in text and "<script>" not in text
+        assert f'<link rel="stylesheet" href="/static/css/{name.replace(".html","")}.css">' in text

@@ -40,11 +40,22 @@ store.init()
 app = FastAPI(title="Bugbox")
 
 logger = logging.getLogger("bugbox")
-
 TEMPLATES = Path(__file__).parent / "templates"
 STATIC_DIR = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR), check_dir=False),
           name="static")
+
+# ── transport / deployment expectations ─────────────────────────────────────
+# BGBOX_HTTPS=1 when the reverse proxy terminates TLS: enables HSTS and is
+# the recommended companion of BGBOX_COOKIE_SECURE=1.
+HTTPS = os.environ.get("BGBOX_HTTPS", "").lower() not in (
+    "", "0", "false", "no")
+# Optional explicit allowlist of origins allowed to POST (space/comma list).
+# Empty = same-origin only (Origin host must equal the Host header).
+_ALLOWED_ORIGINS = {
+    o.strip().lower() for o in
+    (os.environ.get("BGBOX_ORIGINS", "").replace(",", " ").split()) if o.strip()
+}
 
 ADMIN_USER = os.environ.get("BGBOX_ADMIN_USER", "admin")
 ADMIN_PASS = os.environ.get("BGBOX_ADMIN_PASS", "")
@@ -75,6 +86,9 @@ store.ensure_owner(ADMIN_USER, ADMIN_PASS, ADMIN_NAME)
 if not ADMIN_PASS:
     logger.warning("BGBOX_ADMIN_PASS is not set; the local owner login is "
                    "DISABLED (fails closed). Set it in the environment.")
+elif len(ADMIN_PASS) < 12 or ADMIN_PASS.lower().startswith("change-me"):
+    logger.warning("BGBOX_ADMIN_PASS looks short or placeholder-like. Use a "
+                   "long random value (>= 12 chars).")
 if COOKIE_KEY in ("", "change-me", "change-me-too"):
     logger.warning("BGBOX_COOKIE_KEY is unset or still the default. Set a "
                    "long random value so session cookies cannot be forged.")
@@ -82,17 +96,93 @@ if not GITHUB_ENABLED:
     logger.info("GitHub sign-in disabled (set GITHUB_CLIENT_ID and "
                 "GITHUB_CLIENT_SECRET to enable developer accounts).")
 
+# Log hardening: optional rotating log file with secrets scrubbed from every
+# record. Console logging stays untouched.
+LOG_FILE = os.environ.get("BGBOX_LOG_FILE", "")
+if LOG_FILE:
+    from logging.handlers import RotatingFileHandler
+
+    class _Scrub(logging.Filter):
+        """Never write secrets/tokens into the log file."""
+
+        def __init__(self):
+            super().__init__()
+            self.secrets = [v for v in (COOKIE_KEY, ADMIN_PASS,
+                                        GITHUB_CLIENT_SECRET)
+                            if v and len(v) >= 6]
+
+        def filter(self, record: logging.LogRecord) -> bool:
+            msg = record.getMessage()
+            for secret in self.secrets:
+                if secret in msg:
+                    record.msg = record.msg.replace(secret, "[redacted]")
+                    record.args = ()
+            return True
+
+    _fh = RotatingFileHandler(LOG_FILE, maxBytes=1_000_000, backupCount=5)
+    _fh.setFormatter(logging.Formatter(
+        "%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    _fh.addFilter(_Scrub())
+    logger.addHandler(_fh)
+
+
+
+# ── content-security policies ──────────────────────────────────────────────
+# Auth'd pages ship their CSS/JS from /static (no inline), so they get a
+# strict policy without 'unsafe-inline'. Public marketing/landing pages are
+# still allowed inline styles (they contain no inline scripts).
+_CSP_STRICT = ("default-src 'self'; script-src 'self'; style-src 'self'; "
+               "img-src 'self' data:; font-src 'self'; connect-src 'self'; "
+               "object-src 'none'; base-uri 'none'; frame-ancestors 'none'; "
+               "form-action 'self'")
+_CSP_BASELINE = ("default-src 'self'; script-src 'self' 'unsafe-inline'; "
+                 "style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
+                 "font-src 'self'; connect-src 'self'; object-src 'none'; "
+                 "base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
+
+
+def _csp_for(path: str) -> str:
+    if path.startswith(("/admin", "/login", "/api")):
+        return _CSP_STRICT
+    return _CSP_BASELINE
+
+
+def _origin_allowed(request: Request) -> bool:
+    """CSRF gate: state-changing requests must come from a same-origin (or
+    explicitly allow-listed) Origin when the browser sends one."""
+    origin = request.headers.get("origin")
+    if not origin:                    # non-browser clients (curl, tests)
+        return True
+    host = urllib.parse.urlsplit(origin).netloc.lower()
+    if _ALLOWED_ORIGINS:
+        return host in _ALLOWED_ORIGINS
+    return bool(host) and host == (request.headers.get("host") or "").lower()
+
 
 @app.middleware("http")
 async def _hardening(request: Request, call_next):
-    """Payload cap + basic security headers on every response."""
+    """Payload cap + CSRF origin gate + security headers on every response."""
     cl = request.headers.get("content-length")
     if cl and cl.isdigit() and int(cl) > MAX_BODY_BYTES:
         return Response("payload too large", status_code=413)
+    if request.method in ("POST", "PUT", "PATCH", "DELETE"):
+        if not _origin_allowed(request):
+            return JSONResponse({"error": "cross-origin request rejected"},
+                                status_code=403)
     resp = await call_next(request)
     resp.headers.setdefault("X-Content-Type-Options", "nosniff")
     resp.headers.setdefault("X-Frame-Options", "DENY")
     resp.headers.setdefault("Referrer-Policy", "no-referrer")
+    resp.headers.setdefault("X-Robots-Tag", "noindex, nofollow")
+    resp.headers.setdefault(
+        "Permissions-Policy",
+        "camera=(), microphone=(), geolocation=(), payment=(), usb=()")
+    resp.headers.setdefault("Content-Security-Policy",
+                            _csp_for(request.url.path))
+    if HTTPS:
+        resp.headers.setdefault(
+            "Strict-Transport-Security",
+            "max-age=31536000; includeSubDomains")
     return resp
 
 
