@@ -101,6 +101,7 @@ def init() -> None:
                 password_hash TEXT NOT NULL DEFAULT '',
                 github_id TEXT,
                 github_login TEXT,
+                display_name TEXT NOT NULL DEFAULT '',
                 role TEXT NOT NULL DEFAULT 'admin',
                 status TEXT NOT NULL DEFAULT 'approved',
                 created REAL NOT NULL,
@@ -118,6 +119,11 @@ def init() -> None:
             )
             """
         )
+        ucols = [r[1] for r in conn.execute("PRAGMA table_info(users)")]
+        if "display_name" not in ucols:
+            conn.execute(
+                "ALTER TABLE users ADD COLUMN display_name TEXT NOT NULL "
+                "DEFAULT ''")
 
 
 # ── reports (unchanged API) ────────────────────────────────────────────────
@@ -412,23 +418,50 @@ def hmac_compare(a: str, b: str) -> bool:
     return hmac.compare_digest(a, b)
 
 
-def ensure_owner(username: str, password: str) -> None:
-    """Create/refresh the local owner account (no-op when password empty)."""
+def ensure_owner(username: str, password: str,
+                 display_name: str = "") -> None:
+    """Create/refresh the local owner account (no-op when password empty).
+
+    A display name is applied on first creation or when explicitly given (env
+    BGBOX_ADMIN_NAME); otherwise an existing owner keeps the name they chose
+    in the People page across restarts.
+    """
     if not password:
         return
     now = time.time()
     with _lock, _connect() as conn:
-        row = conn.execute("SELECT id FROM users WHERE role = 'owner'").fetchone()
+        row = conn.execute(
+            "SELECT id, display_name FROM users WHERE role = 'owner'"
+        ).fetchone()
         if row:
+            name = display_name or row["display_name"] or username
             conn.execute(
                 "UPDATE users SET username = ?, password_hash = ?, "
-                "status = 'approved' WHERE id = ?",
-                (username, _encrypt_password(password), row["id"]))
+                "display_name = ?, status = 'approved' WHERE id = ?",
+                (username, _encrypt_password(password), name, row["id"]))
         else:
             conn.execute(
-                "INSERT INTO users (username, password_hash, role, status, "
-                "created) VALUES (?, ?, 'owner', 'approved', ?)",
-                (username, _encrypt_password(password), now))
+                "INSERT INTO users (username, password_hash, display_name, "
+                "role, status, created) VALUES (?, ?, ?, 'owner', "
+                "'approved', ?)",
+                (username, _encrypt_password(password),
+                 display_name or username, now))
+
+
+def set_display_name(user_id: int, name: str) -> dict | None:
+    """Set a user's public display name (empty resets to their username)."""
+    with _lock, _connect() as conn:
+        row = conn.execute(
+            "SELECT username FROM users WHERE id = ?", (user_id,)).fetchone()
+        if row is None:
+            return None
+        clean = name.strip()[:80] or row["username"]
+        conn.execute(
+            "UPDATE users SET display_name = ? WHERE id = ?",
+            (clean, user_id))
+        out = conn.execute(
+            "SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    return dict(out)
 
 
 def user_by_username(username: str) -> dict | None:

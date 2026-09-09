@@ -57,6 +57,9 @@
   .cmt .ev-text { color:#e3dccd; }
   .cmt.dim { opacity:.55; }
   .cmt-body.gone { text-decoration:line-through; color:var(--muted); }
+  .autopill { font-size:10px; text-transform:uppercase; letter-spacing:.05em;
+         background:#233a5c; color:#9fc2ff; border-radius:8px; padding:0 7px;
+         margin-left:4px; }
   .cmt-del { float:right; background:none; border:0; color:var(--muted);
          cursor:pointer; font:inherit; font-size:12px; }
   .cmt-del:hover { color:#ff8a8a; }
@@ -174,11 +177,16 @@ function ago(ts) {
 }
 
 const ACT_ICONS = { created: "📝", status: "🔁", tags: "🏷️",
-                     link: "🔗", comment: "💬", comment_removed: "🗑️" };
+                     link: "🔗", comment: "💬", comment_removed: "🗑️",
+                     auto_triage: "🤖" };
 function actRow(ev, rid) {
   const ic = ACT_ICONS[ev.kind] || "•";
+  const auto = (ev.kind === "auto_triage" || ev.role === "auto")
+    ? ' <span class="autopill">auto</span>' : "";
   const who = esc(ev.actor || "system")
-    + (ev.role ? ` <span class="cmt-role">${esc(ev.role)}</span>` : "");
+    + (ev.role && ev.role !== "auto"
+      ? ` <span class="cmt-role">${esc(ev.role)}</span>` : "")
+    + auto;
   const delBtn = (ev.kind === "comment" && !ev.deleted)
     ? `<button type="button" class="cmt-del" data-del-cmt="${ev.seq}" data-id="${rid}" title="remove comment">✕</button>`
     : "";

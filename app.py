@@ -48,6 +48,9 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR), check_dir=False),
 
 ADMIN_USER = os.environ.get("BGBOX_ADMIN_USER", "admin")
 ADMIN_PASS = os.environ.get("BGBOX_ADMIN_PASS", "")
+# Optional display name for the owner (defaults to the username). The owner
+# can also edit it later on the People page; that choice survives restarts.
+ADMIN_NAME = os.environ.get("BGBOX_ADMIN_NAME", "")
 COOKIE_KEY = os.environ.get("BGBOX_COOKIE_KEY", "change-me")
 COOKIE_SECURE = os.environ.get("BGBOX_COOKIE_SECURE", "").lower() not in (
     "", "0", "false", "no")
@@ -67,7 +70,7 @@ LOGIN_RATE_LIMIT = (5, 60)
 _buckets: dict = {}
 _bucket_lock = threading.Lock()
 
-store.ensure_owner(ADMIN_USER, ADMIN_PASS)
+store.ensure_owner(ADMIN_USER, ADMIN_PASS, ADMIN_NAME)
 
 if not ADMIN_PASS:
     logger.warning("BGBOX_ADMIN_PASS is not set; the local owner login is "
@@ -120,6 +123,13 @@ def _current_user(request: Request) -> dict | None:
     if user is None or user.get("status") != "approved":
         return None
     return user
+
+
+def _who(user: dict | None) -> str:
+    """The name shown for a user on timelines (display name first)."""
+    u = user or {}
+    return (u.get("display_name") or u.get("username")
+            or u.get("github_login") or "admin")
 
 
 def _login_cookie(resp: Response, user_id: int) -> None:
@@ -263,7 +273,27 @@ def _analyze_in_background(rid: str) -> None:
             if report is None:
                 return
             recent = [r for r in store.list_reports(limit=15) if r["id"] != rid]
-            store.set_analysis(rid, llm.analyze(report, recent))
+            analysis = llm.analyze(report, recent)
+            store.set_analysis(rid, analysis)
+            # Auto-actions are logged on the timeline with an explicit 'auto'
+            # marker so nobody mistakes machine triage for a human decision.
+            parts = []
+            sev = analysis.get("severity")
+            cat = analysis.get("category")
+            if sev:
+                parts.append(f"severity: {sev}")
+            if cat:
+                parts.append(f"category: {cat}")
+            if parts:
+                store.log_event(
+                    rid, "auto_triage",
+                    "auto-triage assigned " + " · ".join(parts),
+                    actor="auto-triage", role="auto", meta={"auto": True})
+            elif analysis.get("note"):
+                store.log_event(
+                    rid, "auto_triage", "auto-triage skipped — "
+                    + str(analysis.get("note")),
+                    actor="auto-triage", role="auto", meta={"auto": True})
         except Exception:  # analysis must never break the request flow
             logger.exception("background analysis failed for %s", rid)
     threading.Thread(target=job, daemon=True).start()
@@ -443,7 +473,7 @@ def api_status(request: Request, rid: str, status: str = Form("")):
         return JSONResponse({"error": "unauthorized"}, status_code=401)
     if status in {"open", "triaged", "fixed", "wontfix", "duplicate"}:
         store.update_status(rid, status,
-                            actor=user.get("username") or "admin",
+                            actor=_who(user),
                             role=user.get("role") or "")
     return {"ok": True}
 
@@ -472,7 +502,7 @@ def api_tags(request: Request, rid: str,
     if cat and cat not in llm._CATEGORIES:
         return JSONResponse({"error": f"bad category: {cat}"}, status_code=400)
     store.set_tags(rid, sev or None, cat or None,
-                   actor=user.get("username") or "admin",
+                   actor=_who(user),
                    role=user.get("role") or "")
     return {"ok": True}
 
@@ -489,7 +519,7 @@ def api_comment_add(request: Request, rid: str,
         return JSONResponse({"error": "empty comment"}, status_code=400)
     entry = store.add_comment(
         rid,
-        user.get("username") or user.get("github_login") or "admin",
+        _who(user),
         user.get("role") or "admin",
         body,
     )
@@ -506,7 +536,7 @@ def api_comment_delete(request: Request, rid: str,
     if user is None:
         return JSONResponse({"error": "unauthorized"}, status_code=401)
     if not store.delete_comment(rid, index,
-                                actor=user.get("username") or "admin",
+                                actor=_who(user),
                                 role=user.get("role") or ""):
         return JSONResponse({"error": "not found"}, status_code=404)
     return {"ok": True}
@@ -525,7 +555,7 @@ def api_ticket_link(request: Request, rid: str, target: str = Form("")):
     if store.get_report(target) is None or store.get_report(rid) is None:
         return JSONResponse({"error": "not found"}, status_code=404)
     store.link_reports(rid, target,
-                       actor=user.get("username") or "admin",
+                       actor=_who(user),
                        role=user.get("role") or "")
     return {"ok": True}
 
@@ -580,6 +610,25 @@ def api_user_status(request: Request, uid: int,
         # Locked-out users must not keep live sessions.
         store.delete_sessions_for_user(uid)
     return {"ok": True}
+
+
+@app.post("/api/users/{uid}/display-name")
+def api_user_display_name(request: Request, uid: int,
+                          name: str = Form("")):
+    """Set a user's public display name (owner only). Empty resets to the
+    username. The name is what shows on ticket timelines instead of the
+    login/github handle."""
+    user, err = _require_owner(request)
+    if err:
+        return err
+    target = _user_or_404(uid)
+    if target is None:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    if target.get("role") == "owner" and target.get("id") != user.get("id"):
+        return JSONResponse({"error": "cannot rename the owner"},
+                            status_code=400)
+    updated = store.set_display_name(uid, name)
+    return {"ok": True, "display_name": updated["display_name"]}
 
 
 @app.post("/api/users/{uid}/delete")

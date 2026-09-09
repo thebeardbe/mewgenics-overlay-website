@@ -8,6 +8,7 @@ Run (in the site repo, python env with fastapi/httpx/pytest):
 import json
 import os
 import tempfile
+import time
 
 # Isolate storage + secrets BEFORE importing the app.
 _DATA = tempfile.mkdtemp(prefix="bugbox-test-")
@@ -480,3 +481,45 @@ def test_admin_comments_are_append_only():
                        data={"index": seq1}, headers=ADMIN).status_code == 404
     assert logged.post(f"/api/tickets/{rid}/comments/delete",
                        data={"index": 1}, headers=ADMIN).status_code == 404
+
+def test_owner_display_name_appears_on_timeline():
+    owner = [u for u in store.list_users() if u["role"] == "owner"][0]
+    store.set_display_name(owner["id"], "TheBeardBE")
+    logged = _login_client()
+    rid = store.add({"title": "t"})
+    logged.post(f"/api/tickets/{rid}/status", data={"status": "triaged"},
+                headers=ADMIN)
+    act = store.get_report(rid)["activity"]
+    status_ev = next(e for e in act if e["kind"] == "status")
+    assert status_ev["actor"] == "TheBeardBE"
+    # owner can rename via the API; new events use the fresh name
+    r = logged.post(f"/api/users/{owner['id']}/display-name",
+                    data={"name": "Zed"}, headers=ADMIN)
+    assert r.status_code == 200 and r.json()["display_name"] == "Zed"
+    logged.post(f"/api/tickets/{rid}/tags", data={"severity": "low"},
+                headers=ADMIN)
+    act = store.get_report(rid)["activity"]
+    tags_ev = next(e for e in act if e["kind"] == "tags")
+    assert tags_ev["actor"] == "Zed"
+    # empty name resets to the username
+    store.set_display_name(owner["id"], "   ")
+    assert store.user_by_username("admin")["display_name"] == "admin"
+
+
+def test_auto_triage_is_marked_auto_on_timeline():
+    rid = store.add({"title": "t"})
+    # LLM not configured -> analyze() returns {"note": ...} and the timeline
+    # gets an explicit auto_triage entry (machine action, visibly marked).
+    bugbox_app._analyze_in_background(rid)
+    for _ in range(50):
+        act = store.get_report(rid)["activity"]
+        if any(e["kind"] == "auto_triage" for e in act):
+            break
+        time.sleep(0.05)
+    ev = next(e for e in store.get_report(rid)["activity"]
+              if e["kind"] == "auto_triage")
+    assert ev["actor"] == "auto-triage"
+    assert ev["role"] == "auto"
+    assert ev["meta"] == {"auto": True}
+    assert "skipped" in ev["text"].lower()
+

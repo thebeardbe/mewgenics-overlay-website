@@ -45,9 +45,14 @@
   .row { display:flex; gap:14px; align-items:center; flex-wrap:wrap; padding:8px 0;
          border-top:1px solid var(--line); }
   .row:first-child { border-top:0; }
-  .row .name { font-weight:600; min-width:140px; }
+  .row .name { font-weight:600; }
   .row .meta { color:var(--muted); font-size:12px; flex:1; }
   .row .actions { display:flex; gap:6px; }
+  .row .who { display:flex; flex-direction:column; gap:4px; min-width:220px; }
+  .row .dnrow { display:flex; gap:6px; align-items:center; }
+  .row .dnrow input { width:200px; padding:4px 8px; border:1px solid var(--line);
+         border-radius:6px; background:#171614; color:var(--text); font:inherit; font-size:13px; }
+  .row .dnrow button { padding:4px 10px; }
 
   @media (max-width:720px) {
     .app { grid-template-columns:1fr; }
@@ -88,6 +93,11 @@
 </div>
 
 <script>
+function escH(s) { return (s || "").replace(/[&<>]/g,
+  c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])); }
+function escA(s) { return (s || "").replace(/[&<>"']/g,
+  c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+
 async function load() {
   const r = await fetch("/api/users");
   if (r.status === 401) { location.href = "/login"; return; }
@@ -108,9 +118,17 @@ async function load() {
       </span>`;
     }
     const meta = u.github_login ? `github: ${u.github_login}` : "local";
+    const shown = u.display_name || u.username;
     return `<div class="row">
-      <span class="name">${u.username.replace(/[<>&]/g, "")}</span>
-      ${roleTag} ${statusTag}
+      <div class="who">
+        <div><span class="name">${escH(shown)}</span>
+          ${roleTag} ${statusTag}</div>
+        <div class="dnrow">
+          <input data-uid="${u.id}" value="${escA(shown)}" maxlength="40"
+                 title="Public name shown on ticket timelines">
+          <button class="btn" data-dn="${u.id}">Save name</button>
+        </div>
+      </div>
       <span class="meta">${meta.replace(/[<>&]/g, "")}</span>
       ${actions}
     </div>`;
@@ -127,6 +145,16 @@ async function load() {
         body: "status=" + b.dataset.s,
       });
     }
+    load();
+  });
+  document.querySelectorAll("[data-dn]").forEach(b => b.onclick = async () => {
+    const id = b.dataset.dn;
+    const input = document.querySelector(`[data-uid="${id}"]`);
+    await fetch(`/api/users/${id}/display-name`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: "name=" + encodeURIComponent(input.value.trim()),
+    });
     load();
   });
 }
