@@ -310,9 +310,27 @@ def home():
     return _render("index.html", version=latest_version())
 
 
+def _public_page(fragment: str, title: str, active: str = "", **ctx) -> HTMLResponse:
+    """A public page: shared menu/footer (public_frame.html) around a content
+    fragment, so /report feels like the same site as the landing page."""
+    frame = (TEMPLATES / "public_frame.html").read_text(encoding="utf-8")
+    body = (TEMPLATES / fragment).read_text(encoding="utf-8")
+    html = frame.replace("{body}", body, 1)
+    ctx["title"] = title
+    ctx["active"] = active
+
+    def _sub(m):
+        key = m.group(1)
+        return str(ctx.get(key, m.group(0)))
+
+    html = re.sub(r"\{(\w+)\}", _sub, html)
+    return HTMLResponse(html)
+
+
 @app.get("/report", response_class=HTMLResponse)
 def report_page():
-    return _render("report.html", report_url="/submit")
+    return _public_page("report.html", "Report a problem", "active",
+                        report_url="/submit")
 
 
 @app.post("/submit")
@@ -334,7 +352,7 @@ def submit(
         "log": log, "name": name, "contact": contact,
     })
     _analyze_in_background(rid)
-    return _render("thanks.html", rid=rid)
+    return _public_page("thanks.html", "Thanks", rid=rid)
 
 
 @app.post("/api/report")

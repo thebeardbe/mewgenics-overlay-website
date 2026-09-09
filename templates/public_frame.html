@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{title} · Mewgenics Breeding Overlay</title>
+<style>
+  :root { --bg:#14120f; --card:#1e1b16; --card2:#262219; --line:#3a3429;
+          --text:#ece7dc; --muted:#a49f92; --accent:#c62828; --accent2:#e8a33d;
+          --purple:#b39ddb; --font:system-ui, -apple-system, sans-serif; }
+  * { box-sizing:border-box; }
+  html { scroll-behavior:smooth; }
+  body { margin:0; background:var(--bg); color:var(--text); font:16px/1.65 var(--font); }
+  a { color:var(--purple); text-decoration:none; }
+  a:hover { text-decoration:underline; }
+  .wrap { max-width:980px; margin:0 auto; padding:0 22px; }
+  header { position:sticky; top:0; z-index:5; background:rgba(20,18,15,.92);
+           backdrop-filter:blur(6px); border-bottom:1px solid var(--line); }
+  nav { display:flex; align-items:center; gap:18px; height:58px; }
+  nav .logo { font-weight:700; font-size:17px; color:var(--text); }
+  nav .logo .dot { color:var(--accent2); }
+  nav .links { margin-left:auto; display:flex; gap:16px; font-size:14px; }
+  nav .links a { color:var(--muted); }
+  nav .links a:hover { color:var(--text); text-decoration:none; }
+  nav .links a.active { color:var(--accent2); font-weight:600; }
+  main.page { min-height:70vh; }
+  main .card { max-width:720px; margin:34px auto; background:var(--card);
+          border:1px solid var(--line); border-radius:14px; padding:26px 28px; }
+  main h1 { font-size:24px; margin:0 0 6px; }
+  main h1 small { display:block; color:var(--muted); font-weight:normal;
+       font-size:14px; margin-top:6px; }
+  label { display:block; margin:16px 0 6px; color:var(--muted); font-size:14px; }
+  input, select, textarea { width:100%; padding:10px; border:1px solid var(--line);
+       border-radius:8px; background:var(--card2); color:var(--text); font:inherit; }
+  textarea { min-height:110px; resize:vertical; font-family:ui-monospace, monospace; font-size:13px; }
+  .row { display:flex; gap:12px; } .row > div { flex:1; }
+  button { margin-top:20px; width:100%; padding:13px; border:0; border-radius:8px;
+       background:var(--accent); color:#fff; font:inherit; font-weight:600; cursor:pointer; }
+  .hint { color:var(--muted); font-size:13px; margin-top:4px; }
+  .center { text-align:center; }
+  footer { border-top:1px solid var(--line); padding:26px 0 46px; color:var(--muted);
+           font-size:13px; text-align:center; margin-top:40px; }
+  footer a { color:var(--muted); text-decoration:underline; }
+  @media (max-width:640px){ nav { flex-wrap:wrap; height:auto; padding:10px 0; gap:8px; }
+    nav .links { margin-left:0; flex-wrap:wrap; row-gap:6px; } }
+</style>
+</head>
+<body>
+<header><div class="wrap">
+  <nav>
+    <a href="/" class="logo">🐈 Mewgenics<span class="dot"> Overlay</span></a>
+    <span class="links">
+      <a href="/#download">Download</a>
+      <a href="/#features">Features</a>
+      <a href="/#safety">Safety</a>
+      <a href="/#faq">FAQ</a>
+      <a href="/report" class="{active}">Feedback</a>
+    </span>
+  </nav>
+</div></header>
+<main class="page">{body}</main>
+<footer><div class="wrap">
+  <p><b>Mewgenics Breeding Overlay</b> · free · MIT · read-only ·
+    <a href="https://github.com/thebeardbe/mewgenics-breeding-overlay">source</a></p>
+  <p>Parser/genetics: <a href="https://github.com/frankieg33/MewgenicsBreedingManager">MewgenicsBreedingManager</a>
+  (MIT) · <a href="https://store.steampowered.com/app/686060/">Mewgenics</a> on Steam</p>
+</div></footer>
+</body>
+</html>

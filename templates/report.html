@@ -1,32 +1,4 @@
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Report a problem · Mewgenics Breeding Overlay</title>
-<style>
-  :root { --bg:#171614; --card:#24211d; --line:#3a3731; --text:#e8e4dc;
-          --muted:#a49f92; --accent:#c62828; --btn:#2e2a24; }
-  * { box-sizing:border-box; }
-  body { margin:0; font:16px/1.5 system-ui, sans-serif; background:var(--bg);
-         color:var(--text); }
-  main { max-width:680px; margin:0 auto; padding:32px 20px 80px; }
-  h1 { font-size:22px; } h1 small { display:block; color:var(--muted);
-       font-weight:normal; font-size:14px; margin-top:6px; }
-  label { display:block; margin:18px 0 6px; color:var(--muted); font-size:14px; }
-  input, select, textarea { width:100%; padding:10px; border:1px solid var(--line);
-       border-radius:8px; background:var(--card); color:var(--text); font:inherit; }
-  textarea { min-height:110px; resize:vertical; font-family:ui-monospace, monospace; font-size:13px; }
-  .row { display:flex; gap:12px; } .row > div { flex:1; }
-  button { margin-top:22px; width:100%; padding:13px; border:0; border-radius:8px;
-       background:var(--accent); color:#fff; font:inherit; font-weight:600; cursor:pointer; }
-  .hint { color:var(--muted); font-size:13px; margin-top:4px; }
-  .footer { margin-top:26px; color:var(--muted); font-size:12px; text-align:center; }
-  a { color:#c7b8e8; }
-</style>
-</head>
-<body>
-<main>
+<div class="card">
   <h1>Report a problem <small>Mewgenics Breeding Overlay · open source &amp; read-only.
     Reports go straight to the developer.</small></h1>
 
@@ -59,12 +31,9 @@
     <label for="log">Debug info / log paste (optional but very helpful)
       <span class="hint">Use the “Copy debug info” button in the overlay's About box,
       then paste here. If it crashed, the log file sits next to the app
-      (<code>overlay.log</code>), then paste the tail of it.</span></label>
+      (<code>overlay.log</code>) · paste the tail of it.</span></label>
     <textarea id="log" name="log" placeholder="Paste debug info here…"></textarea>
 
     <button type="submit">Send report</button>
   </form>
-  <div class="footer">Free &amp; MIT licensed · <a href="https://github.com/thebeardbe/mewgenics-breeding-overlay">source</a> · <a href="/">← home</a></div>
-</main>
-</body>
-</html>
+</div>
