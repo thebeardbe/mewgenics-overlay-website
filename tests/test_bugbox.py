@@ -420,26 +420,63 @@ def test_tags_endpoint_updates_and_requires_auth():
     assert rep["analysis"]["category"] == "crash"
 
 
-def test_admin_comments_lifecycle():
+def test_activity_log_records_status_tags_and_links():
+    # Every mutation must leave an append-only trace on the ticket timeline.
+    a = store.add({"title": "A", "name": "Catmom87"})
+    b = store.add({"title": "B"})
+    store.update_status(a, "triaged")
+    store.set_tags(a, "critical", "crash")
+    store.link_reports(a, b)
+    act_a = store.get_report(a)["activity"]
+    act_b = store.get_report(b)["activity"]
+    assert [e["kind"] for e in act_a] == ["created", "status", "tags", "link"]
+    assert [e["kind"] for e in act_b] == ["created", "link"]
+    # the link is on both sides of the timeline, not only in `related`
+    assert any(e["kind"] == "link" and e["text"].endswith("#" + b)
+               for e in act_a)
+    assert any(e["kind"] == "link" and e["text"].endswith("#" + a)
+               for e in act_b)
+    assert any("triaged" in e["text"] for e in act_a)
+    assert any("critical" in e["text"] and "crash" in e["text"] for e in act_a)
+    # seq numbers are strictly increasing and never reused
+    seqs = [e["seq"] for e in act_a]
+    assert seqs == sorted(seqs) and len(set(seqs)) == len(seqs)
+
+
+def test_admin_comments_are_append_only():
     rid = store.add({"title": "t"})
     assert client.post(f"/api/tickets/{rid}/comments",
                        data={"body": "hi"}, headers=ADMIN).status_code == 401
     assert client.post(f"/api/tickets/{rid}/comments/delete",
-                       data={"index": 0}, headers=ADMIN).status_code == 401
+                       data={"index": 1}, headers=ADMIN).status_code == 401
     logged = _login_client()
     r = logged.post(f"/api/tickets/{rid}/comments",
                     data={"body": "first admin note"}, headers=ADMIN)
-    assert r.status_code == 200 and r.json()["body"] == "first admin note"
+    assert r.status_code == 200
+    seq1 = r.json()["seq"]
     logged.post(f"/api/tickets/{rid}/comments",
                 data={"body": "second note"}, headers=ADMIN)
-    rep = store.get_report(rid)
-    assert [c["body"] for c in rep["comments"]] == [
+    act = store.get_report(rid)["activity"]
+    bodies = [e["body"] for e in act if e["kind"] == "comment"]
+    assert bodies == ["first admin note", "second note"]
+    assert act[0]["kind"] == "created"
+    assert act[0]["actor"] == "system"  # no reporter name supplied
+
+    # "deleting" a comment is append-only: it is flagged, not erased, and a
+    # comment_removed event lands on the timeline.
+    assert logged.post(f"/api/tickets/{rid}/comments/delete",
+                       data={"index": seq1}, headers=ADMIN).status_code == 200
+    act = store.get_report(rid)["activity"]
+    kinds = [e["kind"] for e in act]
+    assert "comment_removed" in kinds
+    target = next(e for e in act if e["seq"] == seq1)
+    assert target["deleted"] is True
+    assert target["deleted_by"] == "admin"
+    # nothing was physically removed: both bodies still exist in the log
+    assert [e["body"] for e in act if e["kind"] == "comment"] == [
         "first admin note", "second note"]
-    assert rep["comments"][0]["author"] == "admin"
-    # delete by index
+    # deleting twice / deleting a non-comment fails
     assert logged.post(f"/api/tickets/{rid}/comments/delete",
-                       data={"index": 0}, headers=ADMIN).status_code == 200
-    rep = store.get_report(rid)
-    assert [c["body"] for c in rep["comments"]] == ["second note"]
+                       data={"index": seq1}, headers=ADMIN).status_code == 404
     assert logged.post(f"/api/tickets/{rid}/comments/delete",
-                       data={"index": 5}, headers=ADMIN).status_code == 404
+                       data={"index": 1}, headers=ADMIN).status_code == 404

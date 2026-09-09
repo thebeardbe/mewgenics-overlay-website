@@ -54,6 +54,9 @@
   .cmt-meta { font-size:11px; color:var(--muted); }
   .cmt-meta .cmt-role { color:var(--purple); }
   .cmt-body { white-space:pre-wrap; font-size:13px; margin-top:3px; }
+  .cmt .ev-text { color:#e3dccd; }
+  .cmt.dim { opacity:.55; }
+  .cmt-body.gone { text-decoration:line-through; color:var(--muted); }
   .cmt-del { float:right; background:none; border:0; color:var(--muted);
          cursor:pointer; font:inherit; font-size:12px; }
   .cmt-del:hover { color:#ff8a8a; }
@@ -170,6 +173,22 @@ function ago(ts) {
   return h < 24 ? h + "h ago" : Math.round(h / 24) + "d ago";
 }
 
+const ACT_ICONS = { created: "📝", status: "🔁", tags: "🏷️",
+                     link: "🔗", comment: "💬", comment_removed: "🗑️" };
+function actRow(ev, rid) {
+  const ic = ACT_ICONS[ev.kind] || "•";
+  const who = esc(ev.actor || "system")
+    + (ev.role ? ` <span class="cmt-role">${esc(ev.role)}</span>` : "");
+  const delBtn = (ev.kind === "comment" && !ev.deleted)
+    ? `<button type="button" class="cmt-del" data-del-cmt="${ev.seq}" data-id="${rid}" title="remove comment">✕</button>`
+    : "";
+  return `<div class="cmt ${ev.kind === "comment_removed" ? "dim" : ""}">
+    <div class="cmt-meta">${ic} ${who} · ${ago(ev.ts)} ${delBtn}</div>
+    ${ev.text ? `<span class="ev-text">${esc(ev.text)}</span>` : ""}
+    ${ev.body ? `<div class="cmt-body${ev.deleted ? " gone" : ""}">${esc(ev.body)}</div>` : ""}
+  </div>`;
+}
+
 async function load() {
   const r = await fetch("/api/tickets");
   if (r.status === 401) { location.href = "/login"; return; }
@@ -213,6 +232,7 @@ function card(t) {
   const sevCls = ["low","medium","high","critical"].includes(a.severity) ? a.severity : "";
   const sevSel = (a.severity || "medium");
   const catSel = (a.category || t.category || "other");
+  const act = (t.activity || []);
   const preview = a.summary ? ""
     : (t.body ? `<div class="prev">${esc(t.body.replace(/\s+/g, " ")).slice(0, 200)}${t.body.length > 200 ? "…" : ""}</div>` : "");
   const rels = relList.length
@@ -243,17 +263,10 @@ function card(t) {
       <span class="tagsaved" hidden>saved ✓</span>
     </div>
     <div class="cmts">
-      <div class="cmt-head">💬 Comments (${(t.comments || []).length})</div>
-      ${(t.comments || []).map((cm, i) => `
-      <div class="cmt">
-        <div class="cmt-meta">
-          <button type="button" class="cmt-del" data-del-cmt="${i}" data-id="${t.id}" title="delete comment">✕</button>
-          ${esc(cm.author || "admin")} <span class="cmt-role">${esc(cm.role || "")}</span> · ${ago(cm.ts)}
-        </div>
-        <div class="cmt-body">${esc(cm.body || "")}</div>
-      </div>`).join("")}
+      <div class="cmt-head">🧾 Activity (${act.length}) — every action is logged, append-only</div>
+      ${act.map(ev => actRow(ev, t.id)).join("")}
       <div class="cmt-add">
-        <textarea data-id="${t.id}" rows="2" placeholder="Add an admin comment / note…"></textarea>
+        <textarea data-id="${t.id}" rows="2" placeholder="Add a comment / note…"></textarea>
         <button type="button" data-add-cmt="${t.id}">Add</button>
       </div>
     </div>

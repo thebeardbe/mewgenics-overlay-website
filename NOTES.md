@@ -59,20 +59,26 @@ them. Added:
   dropdowns and a 💾 Save button (live "saved ✓" feedback), wired through
   the existing delegation handler.
 
-## ✅ 6. Admin comments on a ticket
+## ✅ 6. Append-only activity timeline (prep for public threads)
 
-Admins can now annotate a ticket without touching the player's text:
+Every action on a ticket is now recorded on an **append-only activity log**,
+so a ticket reads as an ordered audit trail (and later, a public thread):
 
-- `comments` JSON column on reports (auto-migrated on existing DBs);
-  `store.add_comment()` / `store.delete_comment()`.
-- `POST /api/tickets/{rid}/comments` and
-  `POST /api/tickets/{rid}/comments/delete` (both admin-auth).
-- Each admin card shows a **💬 Comments** block (author/role/timestamp,
-  delete ✕ per comment) with a textarea + Add button.
+- New `activity` JSON column (auto-migrated; legacy `comments` entries are
+  folded in on upgrade). Reports start with a `created` event.
+- All mutations log events with actor/role/seq/ts: **status** changes,
+  **tags** edits (old → new), **links** (recorded on *both* tickets, in the
+  timeline), **comments**, and **comment_removed**.
+- Nothing is erased: "deleting" a comment flags the original entry
+  (`deleted`, `deleted_by`, `deleted_ts`) and appends a `comment_removed`
+  event. Seq numbers are strictly increasing.
+- Admin UI shows a per-ticket **🧾 Activity** section (icon per event kind,
+  actor · role · time, text/body) with a comment textarea.
 
-These admin comments are a private first step toward item 3's public
-follow-up threads — the public-thread design still needs the privacy-rule
-decision (save/log stripping) before we expose anything to players.
+This replaces the earlier separate "comments" design (#5/#6 loose ends) and
+is the schema the public follow-up threads (item 3) will expose — the
+privacy-rule decision there is still open (keep full body/log admin-only,
+share only typed comments + event texts publicly).
 
 ## Not currently planned
 

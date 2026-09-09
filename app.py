@@ -438,10 +438,13 @@ def api_tickets(request: Request, status: str | None = None):
 
 @app.post("/api/tickets/{rid}/status")
 def api_status(request: Request, rid: str, status: str = Form("")):
-    if _current_user(request) is None:
+    user = _current_user(request)
+    if user is None:
         return JSONResponse({"error": "unauthorized"}, status_code=401)
     if status in {"open", "triaged", "fixed", "wontfix", "duplicate"}:
-        store.update_status(rid, status)
+        store.update_status(rid, status,
+                            actor=user.get("username") or "admin",
+                            role=user.get("role") or "")
     return {"ok": True}
 
 
@@ -457,7 +460,8 @@ def api_delete(request: Request, rid: str):
 def api_tags(request: Request, rid: str,
              severity: str = Form(""), category: str = Form("")):
     """Admin-editable severity/category tags on a report."""
-    if _current_user(request) is None:
+    user = _current_user(request)
+    if user is None:
         return JSONResponse({"error": "unauthorized"}, status_code=401)
     if store.get_report(rid) is None:
         return JSONResponse({"error": "not found"}, status_code=404)
@@ -467,7 +471,9 @@ def api_tags(request: Request, rid: str,
         return JSONResponse({"error": f"bad severity: {sev}"}, status_code=400)
     if cat and cat not in llm._CATEGORIES:
         return JSONResponse({"error": f"bad category: {cat}"}, status_code=400)
-    store.set_tags(rid, sev or None, cat or None)
+    store.set_tags(rid, sev or None, cat or None,
+                   actor=user.get("username") or "admin",
+                   role=user.get("role") or "")
     return {"ok": True}
 
 
@@ -495,18 +501,22 @@ def api_comment_add(request: Request, rid: str,
 @app.post("/api/tickets/{rid}/comments/delete")
 def api_comment_delete(request: Request, rid: str,
                        index: int = Form(0)):
-    """Remove an admin comment by index."""
-    if _current_user(request) is None:
+    """Mark a comment as removed (append-only: the event stays, flagged)."""
+    user = _current_user(request)
+    if user is None:
         return JSONResponse({"error": "unauthorized"}, status_code=401)
-    if not store.delete_comment(rid, index):
+    if not store.delete_comment(rid, index,
+                                actor=user.get("username") or "admin",
+                                role=user.get("role") or ""):
         return JSONResponse({"error": "not found"}, status_code=404)
     return {"ok": True}
 
 
 @app.post("/api/tickets/{rid}/link")
 def api_ticket_link(request: Request, rid: str, target: str = Form("")):
-    """Link two reports as related (bidirectional)."""
-    if _current_user(request) is None:
+    """Link two reports as related (bidirectional, logged on both)."""
+    user = _current_user(request)
+    if user is None:
         return JSONResponse({"error": "unauthorized"}, status_code=401)
     target = target.strip()
     if not target or target == rid:
@@ -514,7 +524,9 @@ def api_ticket_link(request: Request, rid: str, target: str = Form("")):
                             status_code=400)
     if store.get_report(target) is None or store.get_report(rid) is None:
         return JSONResponse({"error": "not found"}, status_code=404)
-    store.link_reports(rid, target)
+    store.link_reports(rid, target,
+                       actor=user.get("username") or "admin",
+                       role=user.get("role") or "")
     return {"ok": True}
 
 

@@ -46,7 +46,8 @@ def init() -> None:
                 app_version TEXT NOT NULL DEFAULT '',
                 game_patch TEXT NOT NULL DEFAULT '',
                 analysis TEXT NOT NULL DEFAULT '{}',
-                related TEXT NOT NULL DEFAULT '[]'
+                related TEXT NOT NULL DEFAULT '[]',
+                activity TEXT NOT NULL DEFAULT '[]'
             )
             """
         )
@@ -60,6 +61,38 @@ def init() -> None:
             conn.execute(
                 "ALTER TABLE reports ADD COLUMN comments TEXT NOT NULL "
                 "DEFAULT '[]'")
+        # migrate databases that predate the append-only activity timeline
+        if "activity" not in cols:
+            conn.execute(
+                "ALTER TABLE reports ADD COLUMN activity TEXT NOT NULL "
+                "DEFAULT '[]'")
+            # fold any legacy comments column entries into the timeline
+            legacy = conn.execute(
+                "SELECT id, comments FROM reports WHERE comments <> '[]'"
+            ).fetchall()
+            for rid_, raw in legacy:
+                old = _json_list(raw, [])
+                if not old:
+                    continue
+                act = [_json_list(r[0], []) for r in conn.execute(
+                    "SELECT activity FROM reports WHERE id = ?", (rid_,))]
+                act = act[0] if act else []
+                merged = [dict(c) for c in old]
+                merged.extend(act)
+                merged.sort(key=lambda e: (float(e.get("ts") or 0.0),
+                                           str(e.get("author") or "")))
+                for i, e in enumerate(merged, 1):
+                    e["seq"] = i
+                    e.setdefault("kind", "comment")
+                    e.setdefault("text", "")
+                    e.setdefault("actor", e.get("author") or "system")
+                    e.setdefault("body", e.get("body") or "")
+                    e.setdefault("role", "admin")
+                    e.setdefault("meta", None)
+                conn.execute(
+                    "UPDATE reports SET activity = ?, comments = '[]' "
+                    "WHERE id = ?",
+                    (json.dumps(merged, ensure_ascii=False), rid_))
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS users (
@@ -101,6 +134,7 @@ def _s(value, default: str = "", maxlen: int = 0) -> str:
 
 def add(report: dict) -> str:
     rid = uuid.uuid4().hex[:12]
+    created_ts = time.time()
     with _lock, _connect() as conn:
         conn.execute(
             """
@@ -109,7 +143,7 @@ def add(report: dict) -> str:
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                rid, time.time(), "open",
+                rid, created_ts, "open",
                 _s(report.get("category"), "other", 40),
                 _s(report.get("name"), "", 80),
                 _s(report.get("contact"), "", 160),
@@ -119,6 +153,16 @@ def add(report: dict) -> str:
                 _s(report.get("app_version"), "", 32),
                 _s(report.get("game_patch"), "", 64),
             ),
+        )
+        # every ticket starts its append-only activity timeline with 'created'
+        conn.execute(
+            "UPDATE reports SET activity = ? WHERE id = ?",
+            (json.dumps([{
+                "seq": 1, "ts": created_ts, "kind": "created",
+                "actor": _s(report.get("name"), "system", 80) or "system",
+                "role": "player", "text": "report created", "body": "",
+                "meta": None,
+            }]), rid),
         )
     return rid
 
@@ -160,6 +204,7 @@ def list_reports(status: str | None = None, limit: int = 200) -> list[dict]:
             d["analysis"] = {}
         d["related"] = _json_list(d.get("related"), [])
         d["comments"] = _json_list(d.get("comments"), [])
+        d["activity"] = _json_list(d.get("activity"), [])
         out.append(d)
     return out
 
@@ -176,49 +221,86 @@ def get_report(rid: str) -> dict | None:
         d["analysis"] = {}
     d["related"] = _json_list(d.get("related"), [])
     d["comments"] = _json_list(d.get("comments"), [])
+    d["activity"] = _json_list(d.get("activity"), [])
     return d
 
 
-def add_comment(rid: str, author: str, role: str, body: str) -> dict | None:
-    """Append an admin comment/note to a report; returns it (or None)."""
-    rep = get_report(rid)
-    if rep is None:
+def _append_event(conn, rid: str, entry: dict) -> dict | None:
+    """Append an immutable activity entry (caller holds the connection).
+
+    Every entry gets an incrementing ``seq`` and timestamp; entries are never
+    mutated later except ``comment`` entries gaining ``deleted`` markers.
+    """
+    row = conn.execute("SELECT activity FROM reports WHERE id = ?",
+                       (rid,)).fetchone()
+    if row is None:
         return None
-    comments = list(rep.get("comments") or [])
-    entry = {
-        "author": _s(author, "admin", 80),
-        "role": _s(role, "admin", 24),
-        "body": _s(body, "", 20000),
-        "ts": time.time(),
-    }
-    comments.append(entry)
-    with _lock, _connect() as conn:
-        conn.execute(
-            "UPDATE reports SET comments = ? WHERE id = ?",
-            (json.dumps(comments, ensure_ascii=False), rid),
-        )
-    return entry
+    act = _json_list(row[0], [])
+    e = dict(entry)
+    e["seq"] = len(act) + 1
+    e.setdefault("ts", time.time())
+    e["actor"] = _s(e.get("actor"), "system", 80)
+    e["role"] = _s(e.get("role"), "", 24)
+    e["text"] = _s(e.get("text"), "", 300)
+    e["body"] = _s(e.get("body"), "", 20000)
+    e.setdefault("meta", None)
+    act.append(e)
+    conn.execute("UPDATE reports SET activity = ? WHERE id = ?",
+                 (json.dumps(act, ensure_ascii=False), rid))
+    return e
 
 
-def delete_comment(rid: str, index: int) -> bool:
-    """Remove one comment by index. Returns False when out of range."""
-    rep = get_report(rid)
-    if rep is None:
-        return False
-    comments = list(rep.get("comments") or [])
-    if index < 0 or index >= len(comments):
-        return False
-    del comments[index]
+def log_event(rid: str, kind: str, text: str, actor: str = "system",
+              role: str = "", body: str = "",
+              meta: dict | None = None) -> dict | None:
+    """Public helper: append an event to a ticket's timeline."""
     with _lock, _connect() as conn:
-        conn.execute(
-            "UPDATE reports SET comments = ? WHERE id = ?",
-            (json.dumps(comments, ensure_ascii=False), rid),
-        )
+        return _append_event(conn, rid, {
+            "kind": kind, "text": text, "actor": actor, "role": role,
+            "body": body, "meta": meta})
+
+
+def add_comment(rid: str, author: str, role: str, body: str) -> dict | None:
+    """Append a comment/note event to a report; returns it (or None)."""
+    with _lock, _connect() as conn:
+        return _append_event(conn, rid, {
+            "kind": "comment", "text": "", "actor": author,
+            "role": role, "body": _s(body, "", 20000)})
+
+
+def delete_comment(rid: str, seq: int, actor: str = "system",
+                   role: str = "") -> bool:
+    """Mark a comment event as removed — append-only, nothing is erased.
+
+    The original comment stays in the timeline (flagged ``deleted``) and a
+    ``comment_removed`` event is appended so the audit trail is complete.
+    """
+    with _lock, _connect() as conn:
+        row = conn.execute("SELECT activity FROM reports WHERE id = ?",
+                           (rid,)).fetchone()
+        if row is None:
+            return False
+        act = _json_list(row[0], [])
+        target = next((e for e in act
+                       if e.get("seq") == seq and e.get("kind") == "comment"),
+                      None)
+        if target is None or target.get("deleted"):
+            return False
+        target["deleted"] = True
+        target["deleted_by"] = _s(actor, "system", 80)
+        target["deleted_ts"] = time.time()
+        conn.execute("UPDATE reports SET activity = ? WHERE id = ?",
+                     (json.dumps(act, ensure_ascii=False), rid))
+        _append_event(conn, rid, {
+            "kind": "comment_removed",
+            "text": f"removed comment #{seq}",
+            "actor": actor, "role": role})
     return True
 
 
-def link_reports(a: str, b: str) -> None:
-    """Link two reports symmetrically (duplicate/related pairing)."""
+def link_reports(a: str, b: str, actor: str = "system",
+                 role: str = "") -> None:
+    """Link two reports symmetrically and log it on both timelines."""
     with _lock, _connect() as conn:
         rows = conn.execute(
             "SELECT id, related FROM reports WHERE id IN (?, ?)", (a, b)
@@ -226,39 +308,72 @@ def link_reports(a: str, b: str) -> None:
         rel = {r["id"]: _json_list(r["related"], []) for r in rows}
         for rid, others in ((a, b), (b, a)):
             lst = rel.get(rid, [])
-            if others in lst:
-                continue
-            lst.append(others)
-            conn.execute(
-                "UPDATE reports SET related = ? WHERE id = ?",
-                (json.dumps(lst[-12:], ensure_ascii=False), rid))
+            if others not in lst:
+                lst.append(others)
+                conn.execute(
+                    "UPDATE reports SET related = ? WHERE id = ?",
+                    (json.dumps(lst[-12:], ensure_ascii=False), rid))
+                _append_event(conn, rid, {
+                    "kind": "link", "text": f"linked to #{others}",
+                    "actor": actor, "role": role,
+                    "meta": {"target": others}})
 
 
-def update_status(rid: str, status: str) -> None:
+def update_status(rid: str, status: str, actor: str = "system",
+                  role: str = "") -> bool:
+    """Change a report's status and record it on the timeline."""
     with _lock, _connect() as conn:
-        conn.execute("UPDATE reports SET status = ? WHERE id = ?", (status, rid))
+        row = conn.execute("SELECT status FROM reports WHERE id = ?",
+                           (rid,)).fetchone()
+        if row is None:
+            return False
+        old = row[0]
+        if old != status:
+            conn.execute("UPDATE reports SET status = ? WHERE id = ?",
+                         (status, rid))
+            _append_event(conn, rid, {
+                "kind": "status",
+                "text": f"changed status: {old} → {status}",
+                "actor": actor, "role": role,
+                "meta": {"old": old, "new": status}})
+    return True
 
 
-def update_category(rid: str, category: str) -> None:
-    """Keep the dedicated category column in sync when an admin edits tags."""
+def set_tags(rid: str, severity: str | None, category: str | None,
+             actor: str = "system", role: str = "") -> None:
+    """Merge edited tags into the analysis JSON and log what changed."""
     with _lock, _connect() as conn:
-        conn.execute("UPDATE reports SET category = ? WHERE id = ?",
-                     (category, rid))
-
-
-def set_tags(rid: str, severity: str | None, category: str | None) -> None:
-    """Merge edited tags into the analysis JSON (preserving LLM fields)."""
-    rep = get_report(rid)
-    if rep is None:
-        return
-    analysis = dict(rep.get("analysis") or {})
-    if severity:
-        analysis["severity"] = severity
-    if category:
-        analysis["category"] = category
-    set_analysis(rid, analysis)
-    if category:
-        update_category(rid, category)
+        row = conn.execute(
+            "SELECT analysis, category FROM reports WHERE id = ?",
+            (rid,)).fetchone()
+        if row is None:
+            return
+        try:
+            analysis = json.loads(row[0] or "{}")
+        except ValueError:
+            analysis = {}
+        if not isinstance(analysis, dict):
+            analysis = {}
+        old_sev = analysis.get("severity")
+        old_cat = analysis.get("category") or row[1]
+        if severity:
+            analysis["severity"] = severity
+        if category:
+            analysis["category"] = category
+        conn.execute(
+            "UPDATE reports SET analysis = ?, category = ? WHERE id = ?",
+            (json.dumps(analysis, ensure_ascii=False),
+             category or row[1], rid))
+        parts = []
+        if severity and severity != old_sev:
+            parts.append(f"severity: {old_sev or '—'} → {severity}")
+        if category and category != old_cat:
+            parts.append(f"category: {old_cat or '—'} → {category}")
+        if parts:
+            _append_event(conn, rid, {
+                "kind": "tags",
+                "text": "updated tags — " + " · ".join(parts),
+                "actor": actor, "role": role})
 
 
 def delete_report(rid: str) -> None:
