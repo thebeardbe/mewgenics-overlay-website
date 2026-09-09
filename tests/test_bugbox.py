@@ -392,3 +392,54 @@ def test_details_toggle_targets_own_ticket():
     assert 'closest("button.toggle")' in tpl
     assert 'toggle.parentElement.querySelector(".details")' in tpl
     assert "parentElement.parentElement.querySelector" not in tpl
+
+
+# ── admin-editable tags + comments ────────────────────────────────────────
+def test_tags_endpoint_updates_and_requires_auth():
+    rid = store.add({"title": "t"})
+    assert client.post(f"/api/tickets/{rid}/tags",
+                       data={"severity": "high", "category": "ui"},
+                       headers=ADMIN).status_code == 401
+    logged = _login_client()
+    r = logged.post(f"/api/tickets/{rid}/tags",
+                    data={"severity": "critical", "category": "crash"},
+                    headers=ADMIN)
+    assert r.status_code == 200
+    rep = store.get_report(rid)
+    assert rep["analysis"]["severity"] == "critical"
+    assert rep["analysis"]["category"] == "crash"
+    assert rep["category"] == "crash"
+    assert logged.post(f"/api/tickets/{rid}/tags",
+                       data={"severity": "bogus"},
+                       headers=ADMIN).status_code == 400
+    # partial update keeps the other tag
+    logged.post(f"/api/tickets/{rid}/tags", data={"severity": "low"},
+                headers=ADMIN)
+    rep = store.get_report(rid)
+    assert rep["analysis"]["severity"] == "low"
+    assert rep["analysis"]["category"] == "crash"
+
+
+def test_admin_comments_lifecycle():
+    rid = store.add({"title": "t"})
+    assert client.post(f"/api/tickets/{rid}/comments",
+                       data={"body": "hi"}, headers=ADMIN).status_code == 401
+    assert client.post(f"/api/tickets/{rid}/comments/delete",
+                       data={"index": 0}, headers=ADMIN).status_code == 401
+    logged = _login_client()
+    r = logged.post(f"/api/tickets/{rid}/comments",
+                    data={"body": "first admin note"}, headers=ADMIN)
+    assert r.status_code == 200 and r.json()["body"] == "first admin note"
+    logged.post(f"/api/tickets/{rid}/comments",
+                data={"body": "second note"}, headers=ADMIN)
+    rep = store.get_report(rid)
+    assert [c["body"] for c in rep["comments"]] == [
+        "first admin note", "second note"]
+    assert rep["comments"][0]["author"] == "admin"
+    # delete by index
+    assert logged.post(f"/api/tickets/{rid}/comments/delete",
+                       data={"index": 0}, headers=ADMIN).status_code == 200
+    rep = store.get_report(rid)
+    assert [c["body"] for c in rep["comments"]] == ["second note"]
+    assert logged.post(f"/api/tickets/{rid}/comments/delete",
+                       data={"index": 5}, headers=ADMIN).status_code == 404

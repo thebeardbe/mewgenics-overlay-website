@@ -55,6 +55,11 @@ def init() -> None:
         if "related" not in cols:
             conn.execute(
                 "ALTER TABLE reports ADD COLUMN related TEXT NOT NULL DEFAULT '[]'")
+        # migrate databases that predate the admin-comments column
+        if "comments" not in cols:
+            conn.execute(
+                "ALTER TABLE reports ADD COLUMN comments TEXT NOT NULL "
+                "DEFAULT '[]'")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS users (
@@ -154,6 +159,7 @@ def list_reports(status: str | None = None, limit: int = 200) -> list[dict]:
         except ValueError:
             d["analysis"] = {}
         d["related"] = _json_list(d.get("related"), [])
+        d["comments"] = _json_list(d.get("comments"), [])
         out.append(d)
     return out
 
@@ -169,7 +175,46 @@ def get_report(rid: str) -> dict | None:
     except ValueError:
         d["analysis"] = {}
     d["related"] = _json_list(d.get("related"), [])
+    d["comments"] = _json_list(d.get("comments"), [])
     return d
+
+
+def add_comment(rid: str, author: str, role: str, body: str) -> dict | None:
+    """Append an admin comment/note to a report; returns it (or None)."""
+    rep = get_report(rid)
+    if rep is None:
+        return None
+    comments = list(rep.get("comments") or [])
+    entry = {
+        "author": _s(author, "admin", 80),
+        "role": _s(role, "admin", 24),
+        "body": _s(body, "", 20000),
+        "ts": time.time(),
+    }
+    comments.append(entry)
+    with _lock, _connect() as conn:
+        conn.execute(
+            "UPDATE reports SET comments = ? WHERE id = ?",
+            (json.dumps(comments, ensure_ascii=False), rid),
+        )
+    return entry
+
+
+def delete_comment(rid: str, index: int) -> bool:
+    """Remove one comment by index. Returns False when out of range."""
+    rep = get_report(rid)
+    if rep is None:
+        return False
+    comments = list(rep.get("comments") or [])
+    if index < 0 or index >= len(comments):
+        return False
+    del comments[index]
+    with _lock, _connect() as conn:
+        conn.execute(
+            "UPDATE reports SET comments = ? WHERE id = ?",
+            (json.dumps(comments, ensure_ascii=False), rid),
+        )
+    return True
 
 
 def link_reports(a: str, b: str) -> None:

@@ -47,6 +47,25 @@
   .tagsbar button:hover { border-color:var(--muted); }
   .tagsaved { color:var(--good); font-size:12px; }
 
+  .cmts { margin-top:12px; border-top:1px dashed var(--line); padding-top:8px; }
+  .cmt-head { font-size:12px; color:var(--muted); margin-bottom:6px; }
+  .cmt { background:#1a1815; border:1px solid var(--line); border-radius:8px;
+         padding:8px 10px; margin-bottom:6px; }
+  .cmt-meta { font-size:11px; color:var(--muted); }
+  .cmt-meta .cmt-role { color:var(--purple); }
+  .cmt-body { white-space:pre-wrap; font-size:13px; margin-top:3px; }
+  .cmt-del { float:right; background:none; border:0; color:var(--muted);
+         cursor:pointer; font:inherit; font-size:12px; }
+  .cmt-del:hover { color:#ff8a8a; }
+  .cmt-add { display:flex; gap:6px; margin-top:4px; }
+  .cmt-add textarea { flex:1; resize:vertical; min-height:38px; background:#171614;
+         color:var(--text); border:1px solid var(--line); border-radius:6px;
+         padding:6px 8px; font:inherit; font-size:13px; }
+  .cmt-add button { background:#2e2a24; border:1px solid var(--line);
+         color:var(--text); border-radius:6px; padding:4px 12px; cursor:pointer;
+         font:inherit; font-size:13px; align-self:flex-end; }
+  .cmt-add button:hover { border-color:var(--muted); }
+
   main { padding:22px 26px; min-width:0; }
   main h1 { font-size:21px; margin:0 0 2px; }
   main .sub { color:var(--muted); margin:0 0 16px; }
@@ -223,6 +242,21 @@ function card(t) {
       <button type="button" data-save-tags>💾 Save tags</button>
       <span class="tagsaved" hidden>saved ✓</span>
     </div>
+    <div class="cmts">
+      <div class="cmt-head">💬 Comments (${(t.comments || []).length})</div>
+      ${(t.comments || []).map((cm, i) => `
+      <div class="cmt">
+        <div class="cmt-meta">
+          <button type="button" class="cmt-del" data-del-cmt="${i}" data-id="${t.id}" title="delete comment">✕</button>
+          ${esc(cm.author || "admin")} <span class="cmt-role">${esc(cm.role || "")}</span> · ${ago(cm.ts)}
+        </div>
+        <div class="cmt-body">${esc(cm.body || "")}</div>
+      </div>`).join("")}
+      <div class="cmt-add">
+        <textarea data-id="${t.id}" rows="2" placeholder="Add an admin comment / note…"></textarea>
+        <button type="button" data-add-cmt="${t.id}">Add</button>
+      </div>
+    </div>
     <button class="toggle" type="button">▸ show details</button>
     <div class="details">${esc(t.body || "(no description)")}
 ${"=".repeat(30)}
@@ -238,8 +272,33 @@ ${esc((t.log || "").slice(-6000))}</div>
   </div>`;
 }
 
-// event delegation: one listener handles toggles, links, tags and actions
+// event delegation: one listener handles toggles, links, tags, comments, actions
 el.addEventListener("click", async (e) => {
+  const addCmt = e.target.closest("[data-add-cmt]");
+  if (addCmt) {
+    const box = addCmt.parentElement.querySelector("textarea");
+    const body = box.value.trim();
+    if (!body) return;
+    const r = await fetch(`/api/tickets/${addCmt.dataset.addCmt}/comments`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: "body=" + encodeURIComponent(body),
+    });
+    if (!r.ok) alert("Comment failed: " + (await r.json()).error);
+    load();
+    return;
+  }
+  const delCmt = e.target.closest("[data-del-cmt]");
+  if (delCmt) {
+    const r = await fetch(`/api/tickets/${delCmt.dataset.id}/comments/delete`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: "index=" + delCmt.dataset.delCmt,
+    });
+    if (!r.ok) alert("Delete failed: " + (await r.json()).error);
+    load();
+    return;
+  }
   const saveTags = e.target.closest("[data-save-tags]");
   if (saveTags) {
     const bar = saveTags.closest(".tagsbar");

@@ -471,6 +471,38 @@ def api_tags(request: Request, rid: str,
     return {"ok": True}
 
 
+@app.post("/api/tickets/{rid}/comments")
+def api_comment_add(request: Request, rid: str,
+                    body: str = Form("")):
+    """Admin comment/note on a ticket."""
+    user = _current_user(request)
+    if user is None:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    body = body.strip()
+    if not body:
+        return JSONResponse({"error": "empty comment"}, status_code=400)
+    entry = store.add_comment(
+        rid,
+        user.get("username") or user.get("github_login") or "admin",
+        user.get("role") or "admin",
+        body,
+    )
+    if entry is None:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    return entry
+
+
+@app.post("/api/tickets/{rid}/comments/delete")
+def api_comment_delete(request: Request, rid: str,
+                       index: int = Form(0)):
+    """Remove an admin comment by index."""
+    if _current_user(request) is None:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    if not store.delete_comment(rid, index):
+        return JSONResponse({"error": "not found"}, status_code=404)
+    return {"ok": True}
+
+
 @app.post("/api/tickets/{rid}/link")
 def api_ticket_link(request: Request, rid: str, target: str = Form("")):
     """Link two reports as related (bidirectional)."""

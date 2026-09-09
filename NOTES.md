@@ -59,6 +59,21 @@ them. Added:
   dropdowns and a 💾 Save button (live "saved ✓" feedback), wired through
   the existing delegation handler.
 
+## ✅ 6. Admin comments on a ticket
+
+Admins can now annotate a ticket without touching the player's text:
+
+- `comments` JSON column on reports (auto-migrated on existing DBs);
+  `store.add_comment()` / `store.delete_comment()`.
+- `POST /api/tickets/{rid}/comments` and
+  `POST /api/tickets/{rid}/comments/delete` (both admin-auth).
+- Each admin card shows a **💬 Comments** block (author/role/timestamp,
+  delete ✕ per comment) with a textarea + Add button.
+
+These admin comments are a private first step toward item 3's public
+follow-up threads — the public-thread design still needs the privacy-rule
+decision (save/log stripping) before we expose anything to players.
+
 ## Not currently planned
 
 - Automated notification delivery (email/push) is out of scope until the
