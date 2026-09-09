@@ -279,9 +279,7 @@ function card(t) {
       </div>
     </div>
     <button class="toggle" type="button">▸ show details</button>
-    <div class="details">${esc(t.body || "(no description)")}
-${"=".repeat(30)}
-${esc((t.log || "").slice(-6000))}</div>
+    <div class="details" data-rid="${t.id}"></div>
     <div class="actions">
       <button data-act="triaged" data-id="${t.id}">Triaged</button>
       <button data-act="fixed" data-id="${t.id}">Fixed</button>
@@ -347,6 +345,17 @@ el.addEventListener("click", async (e) => {
     const show = d.style.display !== "block";
     d.style.display = show ? "block" : "none";
     toggle.textContent = show ? "▾ hide details" : "▸ show details";
+    if (show && !d.dataset.loaded) {
+      d.textContent = "loading…";
+      const r = await fetch(`/api/tickets/${d.dataset.rid}`);
+      if (r.ok) {
+        const det = await r.json();
+        d.textContent = (det.body || "(no description)")
+          + "\n" + "=".repeat(30) + "\n"
+          + (det.log || "").slice(-6000);
+        d.dataset.loaded = "1";
+      } else d.textContent = "(could not load details)";
+    }
     return;
   }
   const goto = e.target.closest("[data-goto]");

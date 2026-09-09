@@ -21,6 +21,23 @@ _lock = threading.Lock()
 
 _PBKDF2_ROUNDS = 200_000
 
+# ── explicit column lists (wildcard selects are banned) ────────────────────
+# Reports: lite row = everything the admin *list* needs; the heavy body/log
+# columns are only fetched by the detail view.
+_RPT_LITE = ("id", "created", "status", "category", "name", "contact",
+             "title", "app_version", "game_patch", "analysis", "related",
+             "activity")
+_RPT_FULL = _RPT_LITE + ("body", "log", "comments")
+_USR = ("id", "username", "github_id", "github_login", "display_name",
+        "role", "status", "created")          # never contains password_hash
+_USR_AUTH = _USR + ("password_hash",)          # only the verify path
+_USR_JOIN = "u.id, u.username, u.display_name, u.github_login, u.role, u.status"
+_COLS_RPT_LITE = ", ".join(_RPT_LITE)
+_COLS_RPT_FULL = ", ".join(_RPT_FULL)
+_COLS_USR = ", ".join(_USR)
+_COLS_USR_AUTH = ", ".join(_USR_AUTH)
+
+
 
 def _connect() -> sqlite3.Connection:
     os.makedirs(DATA_DIR, exist_ok=True)
@@ -242,7 +259,7 @@ def _parse_reports(rows) -> list[dict]:
 
 
 def list_reports(status: str | None = None, limit: int = 200) -> list[dict]:
-    q = "SELECT * FROM reports"
+    q = "SELECT " + _COLS_RPT_LITE + " FROM reports"
     args: list = []
     if status:
         q += " WHERE status = ?"
@@ -254,9 +271,18 @@ def list_reports(status: str | None = None, limit: int = 200) -> list[dict]:
     return _parse_reports(rows)
 
 
+def exists(rid: str) -> bool:
+    """Cheap existence check — never drags a full row for a 404 probe."""
+    with _lock, _connect() as conn:
+        row = conn.execute("SELECT id FROM reports WHERE id = ?", (rid,)).fetchone()
+    return row is not None
+
+
 def get_report(rid: str) -> dict | None:
     with _lock, _connect() as conn:
-        row = conn.execute("SELECT * FROM reports WHERE id = ?", (rid,)).fetchone()
+        row = conn.execute(
+            "SELECT " + _COLS_RPT_FULL + " FROM reports WHERE id = ?",
+            (rid,)).fetchone()
     if row is None:
         return None
     return _parse_reports([row])[0]
@@ -505,14 +531,14 @@ def set_display_name(user_id: int, name: str) -> dict | None:
             "UPDATE users SET display_name = ? WHERE id = ?",
             (clean, user_id))
         out = conn.execute(
-            "SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+            "SELECT " + _COLS_USR + " FROM users WHERE id = ?", (user_id,)).fetchone()
     return dict(out)
 
 
 def user_by_username(username: str) -> dict | None:
     with _lock, _connect() as conn:
         row = conn.execute(
-            "SELECT * FROM users WHERE username = ?", (username,)).fetchone()
+            "SELECT " + _COLS_USR_AUTH + " FROM users WHERE username = ?", (username,)).fetchone()
     return dict(row) if row else None
 
 
@@ -523,10 +549,10 @@ def user_by_github(github_id: str | None, github_login: str | None) -> dict | No
         row = None
         if github_id:
             row = conn.execute(
-                "SELECT * FROM users WHERE github_id = ?", (github_id,)).fetchone()
+                "SELECT " + _COLS_USR + " FROM users WHERE github_id = ?", (github_id,)).fetchone()
         if row is None and github_login:
             row = conn.execute(
-                "SELECT * FROM users WHERE github_login = ?",
+                "SELECT " + _COLS_USR + " FROM users WHERE github_login = ?",
                 (github_login,)).fetchone()
     return dict(row) if row else None
 
@@ -537,7 +563,7 @@ def create_github_user(github_id: str, github_login: str,
     username = github_login
     with _lock, _connect() as conn:
         existing = conn.execute(
-            "SELECT * FROM users WHERE github_login = ? OR github_id = ?",
+            "SELECT " + _COLS_USR + " FROM users WHERE github_login = ? OR github_id = ?",
             (github_login, github_id)).fetchone()
         if existing:
             # Adopt an owner pre-approval (row created by login only) and
@@ -547,14 +573,14 @@ def create_github_user(github_id: str, github_login: str,
                 "UPDATE users SET github_login = ?, github_id = ? "
                 "WHERE id = ?", (github_login, github_id, existing["id"]))
             row = conn.execute(
-                "SELECT * FROM users WHERE id = ?", (existing["id"],)).fetchone()
+                "SELECT " + _COLS_USR + " FROM users WHERE id = ?", (existing["id"],)).fetchone()
         else:
             conn.execute(
                 "INSERT INTO users (username, github_id, github_login, role, "
                 "status, created) VALUES (?, ?, ?, 'admin', ?, ?)",
                 (username, github_id, github_login, status, now))
             row = conn.execute(
-                "SELECT * FROM users WHERE github_id = ?", (github_id,)
+                "SELECT " + _COLS_USR + " FROM users WHERE github_id = ?", (github_id,)
             ).fetchone()
     return dict(row)
 
@@ -566,7 +592,7 @@ def add_github_preapproval(github_login: str) -> dict | None:
         return None
     with _lock, _connect() as conn:
         row = conn.execute(
-            "SELECT * FROM users WHERE github_login = ?",
+            "SELECT " + _COLS_USR + " FROM users WHERE github_login = ?",
             (github_login,)).fetchone()
         if row is None:
             conn.execute(
@@ -574,7 +600,7 @@ def add_github_preapproval(github_login: str) -> dict | None:
                 "created) VALUES (?, ?, 'admin', 'approved', ?)",
                 (github_login, github_login, time.time()))
             row = conn.execute(
-                "SELECT * FROM users WHERE github_login = ?",
+                "SELECT " + _COLS_USR + " FROM users WHERE github_login = ?",
                 (github_login,)).fetchone()
     return dict(row)
 
@@ -594,7 +620,7 @@ def delete_user(user_id: int) -> None:
 def list_users() -> list[dict]:
     with _lock, _connect() as conn:
         rows = conn.execute(
-            "SELECT * FROM users ORDER BY role = 'owner' DESC, status, "
+            "SELECT " + _COLS_USR + " FROM users ORDER BY role = 'owner' DESC, status, "
             "username").fetchall()
     return [dict(r) for r in rows]
 
@@ -613,7 +639,7 @@ def session_user(token: str | None) -> dict | None:
         return None
     with _lock, _connect() as conn:
         row = conn.execute(
-            "SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id "
+            "SELECT " + _USR_JOIN + " FROM sessions s JOIN users u ON u.id = s.user_id "
             "WHERE s.token = ?", (token,)).fetchone()
     return dict(row) if row else None
 

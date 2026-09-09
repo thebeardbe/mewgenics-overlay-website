@@ -91,6 +91,18 @@ Machine actions are typed, not named: `actor_type` is `user`, `auto`
 (auto-triage 🤖 badge), `system` or `player`; the UI can therefore show a
 clear "auto"/system treatment instead of a person's name.
 
+## ✅ 9. SQL hardening: no SELECT *, hot/cold split
+
+- **Every query now lists explicit columns** (`_COLS_RPT_LITE/_FULL`, `_USR`,
+  `_USR_AUTH`, `_USR_JOIN`). No wildcard selects anywhere in store.py —
+  guarded by a test. `password_hash` is only ever selected by the login
+  verify path; user APIs/list store reads never load it.
+- **Hot/cold split**: `/api/tickets` (list) no longer fetches `body`/`log` —
+  those heavy columns come only from the new `GET /api/tickets/{id}` detail
+  endpoint, and the admin UI loads them lazily when a card is expanded.
+  `store.exists()` gives cheap existence probes so 404 checks never drag a
+  full row.
+
 ## Not currently planned
 
 - Automated notification delivery (email/push) is out of scope until the

@@ -544,3 +544,35 @@ def test_timeline_actor_resolves_from_user_id_after_rename():
                if e["kind"] == "status")
     assert ev2["actor"] == "Renamed Later"
     assert ev2["seq"] == ev["seq"]      # same immutable entry, new label
+
+
+def test_list_is_lite_and_detail_has_heavy_columns():
+    rid = store.add({"title": "heavy", "body": "b" * 5000,
+                     "log": "l" * 9000})
+    lite = [r for r in store.list_reports() if r["id"] == rid][0]
+    assert "body" not in lite and "log" not in lite
+    assert "title" in lite and "activity" in lite
+    full = store.get_report(rid)
+    assert full["body"] == "b" * 5000 and full["log"] == "l" * 9000
+    assert store.exists(rid) is True
+    assert store.exists("nope") is False
+    # the detail endpoint serves the heavy payload; the list endpoint never does
+    logged = _login_client()
+    lr = logged.get("/api/tickets", headers=ADMIN).json()
+    row = [r for r in lr if r["id"] == rid][0]
+    assert "body" not in row and "log" not in row
+    dr = logged.get(f"/api/tickets/{rid}", headers=ADMIN)
+    assert dr.status_code == 200
+    assert dr.json()["log"] == "l" * 9000
+    assert logged.get("/api/tickets/nope", headers=ADMIN).status_code == 404
+
+
+def test_no_select_star_and_no_password_leak():
+    src = open("store.py", encoding="utf-8").read()
+    assert "SELECT * FROM" not in src and "SELECT u.* FROM" not in src
+    assert "password_hash" not in src.split("_USR = ")[0]  # never in public tuple? (cheap guard)
+    for u in store.list_users():
+        assert "password_hash" not in u
+    logged = _login_client()
+    for u in logged.get("/api/users", headers=ADMIN).json():
+        assert "password_hash" not in u

@@ -466,6 +466,18 @@ def api_tickets(request: Request, status: str | None = None):
     return store.list_reports(status)
 
 
+@app.get("/api/tickets/{rid}")
+def api_ticket_detail(request: Request, rid: str):
+    """Full ticket incl. the heavy body/log columns — the list endpoint never
+    ships those, so the admin UI fetches them lazily on expand."""
+    if _current_user(request) is None:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    rep = store.get_report(rid)
+    if rep is None:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    return rep
+
+
 @app.post("/api/tickets/{rid}/status")
 def api_status(request: Request, rid: str, status: str = Form("")):
     user = _current_user(request)
@@ -556,7 +568,7 @@ def api_ticket_link(request: Request, rid: str, target: str = Form("")):
     if not target or target == rid:
         return JSONResponse({"error": "pick another ticket id"},
                             status_code=400)
-    if store.get_report(target) is None or store.get_report(rid) is None:
+    if not store.exists(target) or not store.exists(rid):
         return JSONResponse({"error": "not found"}, status_code=404)
     store.link_reports(rid, target,
                        actor=(user.get("username") or user.get("github_login") or "admin"),
