@@ -523,3 +523,24 @@ def test_auto_triage_is_marked_auto_on_timeline():
     assert ev["meta"] == {"auto": True}
     assert "skipped" in ev["text"].lower()
 
+
+
+def test_timeline_actor_resolves_from_user_id_after_rename():
+    owner = [u for u in store.list_users() if u["role"] == "owner"][0]
+    store.set_display_name(owner["id"], "First")
+    logged = _login_client()
+    rid = store.add({"title": "t"})
+    logged.post(f"/api/tickets/{rid}/status", data={"status": "fixed"},
+                headers=ADMIN)
+    ev = next(e for e in store.get_report(rid)["activity"]
+              if e["kind"] == "status")
+    # events carry the acting user's id, not a baked display name
+    assert ev["actor_id"] == owner["id"]
+    assert ev["actor_type"] == "user"
+    assert ev["actor"] == "First"
+    # rename afterwards -> the SAME old event now shows the new name
+    store.set_display_name(owner["id"], "Renamed Later")
+    ev2 = next(e for e in store.get_report(rid)["activity"]
+               if e["kind"] == "status")
+    assert ev2["actor"] == "Renamed Later"
+    assert ev2["seq"] == ev["seq"]      # same immutable entry, new label

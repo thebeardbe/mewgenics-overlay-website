@@ -191,16 +191,41 @@ def _json_list(value, default):
     return data if isinstance(data, list) else default
 
 
-def list_reports(status: str | None = None, limit: int = 200) -> list[dict]:
-    q = "SELECT * FROM reports"
-    args: list = []
-    if status:
-        q += " WHERE status = ?"
-        args.append(status)
-    q += " ORDER BY created DESC LIMIT ?"
-    args.append(limit)
+def _user_display_map(ids) -> dict:
+    """id -> current display name (falling back to the login username)."""
+    ids = [i for i in ids if i is not None]
+    if not ids:
+        return {}
     with _lock, _connect() as conn:
-        rows = conn.execute(q, args).fetchall()
+        ph = ",".join("?" for _ in ids)
+        rows = conn.execute(
+            f"SELECT id, username, display_name FROM users WHERE id IN ({ph})",
+            ids).fetchall()
+    return {r["id"]: (r["display_name"] or r["username"]) for r in rows}
+
+
+def _resolve_activity(reports: list[dict]) -> None:
+    """Replace stored usernames on user events with current display names.
+
+    Events keep the acting user's *id* (append-only); the name shown is
+    resolved at read time, so a rename in People is reflected everywhere
+    immediately — no baked-in copies to go stale.
+    """
+    ids = set()
+    for r in reports:
+        for e in r.get("activity") or []:
+            if e.get("actor_type") == "user" and e.get("actor_id") is not None:
+                ids.add(e["actor_id"])
+    names = _user_display_map(ids)
+    for r in reports:
+        for e in r.get("activity") or []:
+            if e.get("actor_type") == "user":
+                shown = names.get(e.get("actor_id"))
+                if shown:
+                    e["actor"] = shown
+
+
+def _parse_reports(rows) -> list[dict]:
     out = []
     for r in rows:
         d = dict(r)
@@ -212,7 +237,21 @@ def list_reports(status: str | None = None, limit: int = 200) -> list[dict]:
         d["comments"] = _json_list(d.get("comments"), [])
         d["activity"] = _json_list(d.get("activity"), [])
         out.append(d)
+    _resolve_activity(out)
     return out
+
+
+def list_reports(status: str | None = None, limit: int = 200) -> list[dict]:
+    q = "SELECT * FROM reports"
+    args: list = []
+    if status:
+        q += " WHERE status = ?"
+        args.append(status)
+    q += " ORDER BY created DESC LIMIT ?"
+    args.append(limit)
+    with _lock, _connect() as conn:
+        rows = conn.execute(q, args).fetchall()
+    return _parse_reports(rows)
 
 
 def get_report(rid: str) -> dict | None:
@@ -220,15 +259,7 @@ def get_report(rid: str) -> dict | None:
         row = conn.execute("SELECT * FROM reports WHERE id = ?", (rid,)).fetchone()
     if row is None:
         return None
-    d = dict(row)
-    try:
-        d["analysis"] = json.loads(d.get("analysis") or "{}")
-    except ValueError:
-        d["analysis"] = {}
-    d["related"] = _json_list(d.get("related"), [])
-    d["comments"] = _json_list(d.get("comments"), [])
-    d["activity"] = _json_list(d.get("activity"), [])
-    return d
+    return _parse_reports([row])[0]
 
 
 def _append_event(conn, rid: str, entry: dict) -> dict | None:
@@ -250,6 +281,16 @@ def _append_event(conn, rid: str, entry: dict) -> dict | None:
     e["text"] = _s(e.get("text"), "", 300)
     e["body"] = _s(e.get("body"), "", 20000)
     e.setdefault("meta", None)
+    # structured actor: user events keep the id (names resolve at read time),
+    # machine events are typed so the UI can badge them (auto/system/player)
+    e["actor_id"] = e.get("actor_id")
+    if not e.get("actor_type"):
+        if e.get("actor_id") is not None:
+            e["actor_type"] = "user"
+        elif str(e.get("actor")) == "auto-triage":
+            e["actor_type"] = "auto"
+        else:
+            e["actor_type"] = "system"
     act.append(e)
     conn.execute("UPDATE reports SET activity = ? WHERE id = ?",
                  (json.dumps(act, ensure_ascii=False), rid))
@@ -258,24 +299,27 @@ def _append_event(conn, rid: str, entry: dict) -> dict | None:
 
 def log_event(rid: str, kind: str, text: str, actor: str = "system",
               role: str = "", body: str = "",
-              meta: dict | None = None) -> dict | None:
+              meta: dict | None = None,
+              actor_id: int | None = None) -> dict | None:
     """Public helper: append an event to a ticket's timeline."""
     with _lock, _connect() as conn:
         return _append_event(conn, rid, {
             "kind": kind, "text": text, "actor": actor, "role": role,
-            "body": body, "meta": meta})
+            "body": body, "meta": meta, "actor_id": actor_id})
 
 
-def add_comment(rid: str, author: str, role: str, body: str) -> dict | None:
+def add_comment(rid: str, author: str, role: str, body: str,
+                actor_id: int | None = None) -> dict | None:
     """Append a comment/note event to a report; returns it (or None)."""
     with _lock, _connect() as conn:
         return _append_event(conn, rid, {
             "kind": "comment", "text": "", "actor": author,
-            "role": role, "body": _s(body, "", 20000)})
+            "role": role, "body": _s(body, "", 20000),
+            "actor_id": actor_id})
 
 
 def delete_comment(rid: str, seq: int, actor: str = "system",
-                   role: str = "") -> bool:
+                   role: str = "", actor_id: int | None = None) -> bool:
     """Mark a comment event as removed — append-only, nothing is erased.
 
     The original comment stays in the timeline (flagged ``deleted``) and a
@@ -300,12 +344,12 @@ def delete_comment(rid: str, seq: int, actor: str = "system",
         _append_event(conn, rid, {
             "kind": "comment_removed",
             "text": f"removed comment #{seq}",
-            "actor": actor, "role": role})
+            "actor": actor, "role": role, "actor_id": actor_id})
     return True
 
 
 def link_reports(a: str, b: str, actor: str = "system",
-                 role: str = "") -> None:
+                 role: str = "", actor_id: int | None = None) -> None:
     """Link two reports symmetrically and log it on both timelines."""
     with _lock, _connect() as conn:
         rows = conn.execute(
@@ -322,11 +366,11 @@ def link_reports(a: str, b: str, actor: str = "system",
                 _append_event(conn, rid, {
                     "kind": "link", "text": f"linked to #{others}",
                     "actor": actor, "role": role,
-                    "meta": {"target": others}})
+                    "meta": {"target": others}, "actor_id": actor_id})
 
 
 def update_status(rid: str, status: str, actor: str = "system",
-                  role: str = "") -> bool:
+                  role: str = "", actor_id: int | None = None) -> bool:
     """Change a report's status and record it on the timeline."""
     with _lock, _connect() as conn:
         row = conn.execute("SELECT status FROM reports WHERE id = ?",
@@ -341,12 +385,13 @@ def update_status(rid: str, status: str, actor: str = "system",
                 "kind": "status",
                 "text": f"changed status: {old} → {status}",
                 "actor": actor, "role": role,
-                "meta": {"old": old, "new": status}})
+                "meta": {"old": old, "new": status}, "actor_id": actor_id})
     return True
 
 
 def set_tags(rid: str, severity: str | None, category: str | None,
-             actor: str = "system", role: str = "") -> None:
+             actor: str = "system", role: str = "",
+             actor_id: int | None = None) -> None:
     """Merge edited tags into the analysis JSON and log what changed."""
     with _lock, _connect() as conn:
         row = conn.execute(
@@ -379,7 +424,7 @@ def set_tags(rid: str, severity: str | None, category: str | None,
             _append_event(conn, rid, {
                 "kind": "tags",
                 "text": "updated tags — " + " · ".join(parts),
-                "actor": actor, "role": role})
+                "actor": actor, "role": role, "actor_id": actor_id})
 
 
 def delete_report(rid: str) -> None:

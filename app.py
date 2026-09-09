@@ -473,8 +473,9 @@ def api_status(request: Request, rid: str, status: str = Form("")):
         return JSONResponse({"error": "unauthorized"}, status_code=401)
     if status in {"open", "triaged", "fixed", "wontfix", "duplicate"}:
         store.update_status(rid, status,
-                            actor=_who(user),
-                            role=user.get("role") or "")
+                            actor=(user.get("username") or user.get("github_login") or "admin"),
+                            role=user.get("role") or "",
+                           actor_id=user.get("id"))
     return {"ok": True}
 
 
@@ -502,8 +503,9 @@ def api_tags(request: Request, rid: str,
     if cat and cat not in llm._CATEGORIES:
         return JSONResponse({"error": f"bad category: {cat}"}, status_code=400)
     store.set_tags(rid, sev or None, cat or None,
-                   actor=_who(user),
-                   role=user.get("role") or "")
+                   actor=(user.get("username") or user.get("github_login") or "admin"),
+                   role=user.get("role") or "",
+                           actor_id=user.get("id"))
     return {"ok": True}
 
 
@@ -519,9 +521,10 @@ def api_comment_add(request: Request, rid: str,
         return JSONResponse({"error": "empty comment"}, status_code=400)
     entry = store.add_comment(
         rid,
-        _who(user),
+        (user.get("username") or user.get("github_login") or "admin"),
         user.get("role") or "admin",
         body,
+        actor_id=user.get("id"),
     )
     if entry is None:
         return JSONResponse({"error": "not found"}, status_code=404)
@@ -536,8 +539,9 @@ def api_comment_delete(request: Request, rid: str,
     if user is None:
         return JSONResponse({"error": "unauthorized"}, status_code=401)
     if not store.delete_comment(rid, index,
-                                actor=_who(user),
-                                role=user.get("role") or ""):
+                                actor=(user.get("username") or user.get("github_login") or "admin"),
+                                role=user.get("role") or "",
+                           actor_id=user.get("id")):
         return JSONResponse({"error": "not found"}, status_code=404)
     return {"ok": True}
 
@@ -555,8 +559,9 @@ def api_ticket_link(request: Request, rid: str, target: str = Form("")):
     if store.get_report(target) is None or store.get_report(rid) is None:
         return JSONResponse({"error": "not found"}, status_code=404)
     store.link_reports(rid, target,
-                       actor=_who(user),
-                       role=user.get("role") or "")
+                       actor=(user.get("username") or user.get("github_login") or "admin"),
+                       role=user.get("role") or "",
+                           actor_id=user.get("id"))
     return {"ok": True}
 
 
