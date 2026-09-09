@@ -27,8 +27,25 @@
   aside a .cnt { margin-left:auto; font-size:11px; color:var(--muted);
           background:var(--card); border-radius:10px; padding:0 7px; }
   aside a.active .cnt { color:#fff; background:rgba(255,255,255,.18); }
+  aside a.prim { font-size:15px; font-weight:600; padding:9px 10px; }
+  aside nav.subnav { display:flex; flex-direction:column; gap:1px; }
+  aside nav.subnav.closed { display:none; }
+  aside nav.subnav a { padding:5px 10px 5px 26px; font-size:14px; }
+  aside .chev { margin-left:auto; color:var(--muted); font-size:12px; }
   aside .spacer { flex:1; }
   aside a.out { color:var(--muted); }
+
+  .tagsbar { display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+          margin-top:10px; font-size:12px; color:var(--muted); }
+  .tagsbar label { color:var(--muted); }
+  .tagsbar select { background:#171614; color:var(--text);
+          border:1px solid var(--line); border-radius:6px;
+          padding:3px 6px; font:inherit; font-size:12px; }
+  .tagsbar button { background:#2e2a24; border:1px solid var(--line);
+          color:var(--text); border-radius:6px; padding:3px 10px;
+          cursor:pointer; font:inherit; font-size:12px; }
+  .tagsbar button:hover { border-color:var(--muted); }
+  .tagsaved { color:var(--good); font-size:12px; }
 
   main { padding:22px 26px; min-width:0; }
   main h1 { font-size:21px; margin:0 0 2px; }
@@ -86,13 +103,17 @@
 <div class="app">
   <aside>
     <div class="brand">🐞 Bugbox</div>
-    <div class="group">Tickets</div>
-    <a href="#" data-s="" class="active">📥 All <span class="cnt" id="cnt-all"></span></a>
-    <a href="#" data-s="open">🟠 Open <span class="cnt" id="cnt-open"></span></a>
-    <a href="#" data-s="triaged">🏷️ Triaged <span class="cnt" id="cnt-triaged"></span></a>
-    <a href="#" data-s="fixed">✅ Fixed <span class="cnt" id="cnt-fixed"></span></a>
-    <a href="#" data-s="wontfix">🚫 Won't fix <span class="cnt" id="cnt-wontfix"></span></a>
-    <a href="#" data-s="duplicate">🔁 Duplicates <span class="cnt" id="cnt-duplicate"></span></a>
+    <div class="group">Menu</div>
+    <a class="prim" href="#" id="tickets-trigger">🎫 Tickets
+      <span class="chev" id="tickets-chev">▾</span></a>
+    <nav class="subnav" id="tickets-sub">
+      <a href="#" data-s="" class="active">📥 All <span class="cnt" id="cnt-all"></span></a>
+      <a href="#" data-s="open">🟠 Open <span class="cnt" id="cnt-open"></span></a>
+      <a href="#" data-s="triaged">🏷️ Triaged <span class="cnt" id="cnt-triaged"></span></a>
+      <a href="#" data-s="fixed">✅ Fixed <span class="cnt" id="cnt-fixed"></span></a>
+      <a href="#" data-s="wontfix">🚫 Won't fix <span class="cnt" id="cnt-wontfix"></span></a>
+      <a href="#" data-s="duplicate">🔁 Duplicates <span class="cnt" id="cnt-duplicate"></span></a>
+    </nav>
     {people_link}
     <div class="spacer"></div>
     <div class="group">Account</div>
@@ -104,7 +125,7 @@
     <h1>🐞 Bugbox</h1>
     <p class="sub" id="heading">Reports for Mewgenics Breeding Overlay</p>
     <input class="search" id="search" type="search"
-           placeholder="Search titles, bodies, names, logs…" autocomplete="off">
+           placeholder="Search titles, bodies, names, logs, #ids…" autocomplete="off">
     <div id="list"></div>
   </main>
 </div>
@@ -114,6 +135,9 @@ const el = document.getElementById("list");
 const searchEl = document.getElementById("search");
 let tickets = [];
 let current = "";
+const SEVERITIES = ["low", "medium", "high", "critical"];
+const CATEGORIES = ["parser", "save", "crash", "ui", "breeding",
+                    "donations", "other"];
 
 function esc(s) {
   return (s || "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;",
@@ -141,7 +165,8 @@ async function load() {
 }
 
 function visible() {
-  const q = searchEl.value.trim().toLowerCase();
+  let q = searchEl.value.trim().toLowerCase();
+  if (q.startsWith("#")) q = q.slice(1).trim();   // #demo02 -> demo02
   return tickets.filter(t => {
     if (current && t.status !== current) return false;
     if (!q) return true;
@@ -167,6 +192,8 @@ function card(t) {
   const dupes = (a.dupe_ids || []).length
     ? '<div class="cause">⚠ likely dupe of: ' + a.dupe_ids.map(x => "#" + esc(x)).join(", ") + "</div>" : "";
   const sevCls = ["low","medium","high","critical"].includes(a.severity) ? a.severity : "";
+  const sevSel = (a.severity || "medium");
+  const catSel = (a.category || t.category || "other");
   const preview = a.summary ? ""
     : (t.body ? `<div class="prev">${esc(t.body.replace(/\s+/g, " ")).slice(0, 200)}${t.body.length > 200 ? "…" : ""}</div>` : "");
   const rels = relList.length
@@ -185,6 +212,17 @@ function card(t) {
     ${a.likely_cause ? `<div class="cause">🔧 ${esc(a.likely_cause)}</div>` : ""}
     ${dupes}
     ${rels}
+    <div class="tagsbar" data-tid="${t.id}">
+      <label>Tags:</label>
+      <select data-tag="severity" aria-label="Severity">
+        ${SEVERITIES.map(s => `<option value="${s}" ${s === sevSel ? "selected" : ""}>${s}</option>`).join("")}
+      </select>
+      <select data-tag="category" aria-label="Category">
+        ${CATEGORIES.map(c => `<option value="${c}" ${c === catSel ? "selected" : ""}>${c}</option>`).join("")}
+      </select>
+      <button type="button" data-save-tags>💾 Save tags</button>
+      <span class="tagsaved" hidden>saved ✓</span>
+    </div>
     <button class="toggle" type="button">▸ show details</button>
     <div class="details">${esc(t.body || "(no description)")}
 ${"=".repeat(30)}
@@ -200,8 +238,29 @@ ${esc((t.log || "").slice(-6000))}</div>
   </div>`;
 }
 
-// event delegation: one listener handles toggles, links and actions
+// event delegation: one listener handles toggles, links, tags and actions
 el.addEventListener("click", async (e) => {
+  const saveTags = e.target.closest("[data-save-tags]");
+  if (saveTags) {
+    const bar = saveTags.closest(".tagsbar");
+    const rid = bar.dataset.tid;
+    const body = new URLSearchParams();
+    body.set("severity", bar.querySelector('[data-tag="severity"]').value);
+    body.set("category", bar.querySelector('[data-tag="category"]').value);
+    const r = await fetch(`/api/tickets/${rid}/tags`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: body.toString(),
+    });
+    if (!r.ok) alert("Save failed: " + (await r.json()).error);
+    else {
+      const ok = bar.querySelector(".tagsaved");
+      ok.hidden = false;
+      setTimeout(() => { ok.hidden = true; }, 1200);
+    }
+    load();
+    return;
+  }
   const toggle = e.target.closest("button.toggle");
   if (toggle) {
     const d = toggle.parentElement.querySelector(".details");
@@ -254,6 +313,13 @@ document.querySelectorAll("aside a[data-s]").forEach(a => a.onclick = e => {
   render();
 });
 searchEl.addEventListener("input", render);
+document.getElementById("tickets-trigger").addEventListener("click", (e) => {
+  e.preventDefault();
+  const sub = document.getElementById("tickets-sub");
+  sub.classList.toggle("closed");
+  document.getElementById("tickets-chev").textContent =
+    sub.classList.contains("closed") ? "▸" : "▾";
+});
 load();
 </script>
 </body>

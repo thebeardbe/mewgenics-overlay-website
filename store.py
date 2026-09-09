@@ -194,6 +194,28 @@ def update_status(rid: str, status: str) -> None:
         conn.execute("UPDATE reports SET status = ? WHERE id = ?", (status, rid))
 
 
+def update_category(rid: str, category: str) -> None:
+    """Keep the dedicated category column in sync when an admin edits tags."""
+    with _lock, _connect() as conn:
+        conn.execute("UPDATE reports SET category = ? WHERE id = ?",
+                     (category, rid))
+
+
+def set_tags(rid: str, severity: str | None, category: str | None) -> None:
+    """Merge edited tags into the analysis JSON (preserving LLM fields)."""
+    rep = get_report(rid)
+    if rep is None:
+        return
+    analysis = dict(rep.get("analysis") or {})
+    if severity:
+        analysis["severity"] = severity
+    if category:
+        analysis["category"] = category
+    set_analysis(rid, analysis)
+    if category:
+        update_category(rid, category)
+
+
 def delete_report(rid: str) -> None:
     with _lock, _connect() as conn:
         conn.execute("DELETE FROM reports WHERE id = ?", (rid,))

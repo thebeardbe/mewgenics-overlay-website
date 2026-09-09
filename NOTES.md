@@ -1,35 +1,21 @@
 # Bugbox / Landing — pending follow-ups
 
-Logged while testing the admin UI. Nothing here is implemented yet; we return
-to these items in a later session. Each entry captures the ask and the notes
-we already know about the problem.
+Status log while setting up the site. ✅ = implemented & pushed.
 
-## 1. Search box + related-ticket jump break on `#` ids
+## ✅ 1. Search box + related-ticket jump break on `#` ids
 
-The ticket ids are bare (e.g. `demo02`), but the related-ticket chips set the
-search box to `#demo02`. The search filter then finds nothing because the
-searchable text never contains the `#` prefix, and typing a `#` in the box
-generally doesn't behave like a user expects.
+Fixed in admin.html: the search normaliser now trims and treats a leading `#`
+as an id prefix (`#demo02` → matches id `demo02`), so the related-ticket chips
+and manual `#id` typing both resolve. Placeholder text updated to advertise
+`#ids`. (Jump currently filters the list rather than scroll-highlighting the
+card — the "focus ticket" polish can come with the public-thread work.)
 
-What to fix later:
+## ✅ 2. Sidebar menu structure and sizing
 
-- Normalise the query: trim, and treat a leading `#` as an id prefix (strip
-  or match `#id` against the bare id) so `#demo02` resolves.
-- The data-goto jump should probably route through a real "focus ticket"
-  action (highlight + scroll) instead of abusing the search box.
-- Add tests for `#`-prefixed search and for chip navigation.
-
-## 2. Sidebar menu structure and sizing
-
-Current sidebar is flat and the entries feel small.
-
-Wanted:
-
-- `Tickets` and `People` should be primary (larger) nav items.
-- The report state filters (All / Open / Triaged / Fixed / Won't fix /
-  Duplicates) should become sub-items under a `Tickets` parent (e.g.
-  collapsible group or nested indentation), not separate top-level items.
-- Keep live counts, and the People item only for the owner.
+Reworked: primary **🎫 Tickets** (larger) is a collapsible group whose
+sub-items (All / Open / Triaged / Fixed / Won't fix / Duplicates) are nested
+and indented; **👥 People** is a primary item shown only to the owner; live
+counts kept on every sub-item; Account row stays at the bottom.
 
 ## 3. Public follow-up thread per ticket (GitHub-issues style)
 
@@ -60,6 +46,18 @@ sends:
   category and prefill status transitions).
 - Needs_reply replies flow into the public follow-up thread (item 3) for a
   quick human review + send.
+
+## ✅ 5. Admin couldn't edit the tags on a ticket
+
+Triage assigns severity + category tags, but there was no way to correct
+them. Added:
+
+- `POST /api/tickets/{rid}/tags` (auth; validates against the allowed
+  severity/category lists; merges into the analysis JSON and keeps the
+  `category` column in sync) — `store.set_tags()`.
+- Per-ticket **Tags:** bar in the admin card with Severity + Category
+  dropdowns and a 💾 Save button (live "saved ✓" feedback), wired through
+  the existing delegation handler.
 
 ## Not currently planned
 

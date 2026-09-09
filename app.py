@@ -414,7 +414,7 @@ def admin_page(request: Request):
     user = _current_user(request)
     if user is None:
         return RedirectResponse("/login")
-    people_link = ('<a href="/admin/people">👥 People</a>'
+    people_link = ('<a class="prim" href="/admin/people">👥 People</a>'
                    if user.get("role") == "owner" else "")
     return _render("admin.html", people_link=people_link)
 
@@ -450,6 +450,24 @@ def api_delete(request: Request, rid: str):
     if _current_user(request) is None:
         return JSONResponse({"error": "unauthorized"}, status_code=401)
     store.delete_report(rid)
+    return {"ok": True}
+
+
+@app.post("/api/tickets/{rid}/tags")
+def api_tags(request: Request, rid: str,
+             severity: str = Form(""), category: str = Form("")):
+    """Admin-editable severity/category tags on a report."""
+    if _current_user(request) is None:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    if store.get_report(rid) is None:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    sev = severity.strip().lower()
+    cat = category.strip().lower()
+    if sev and sev not in llm._SEVERITIES:
+        return JSONResponse({"error": f"bad severity: {sev}"}, status_code=400)
+    if cat and cat not in llm._CATEGORIES:
+        return JSONResponse({"error": f"bad category: {cat}"}, status_code=400)
+    store.set_tags(rid, sev or None, cat or None)
     return {"ok": True}
 
 
