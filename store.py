@@ -146,6 +146,42 @@ def init() -> None:
         if "csrf" not in scol:
             conn.execute(
                 "ALTER TABLE sessions ADD COLUMN csrf TEXT NOT NULL DEFAULT ''")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS activity (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                report_id TEXT NOT NULL,
+                seq INTEGER NOT NULL,
+                ts REAL NOT NULL,
+                kind TEXT NOT NULL DEFAULT '',
+                actor TEXT NOT NULL DEFAULT '',
+                actor_id INTEGER,
+                actor_type TEXT NOT NULL DEFAULT '',
+                role TEXT NOT NULL DEFAULT '',
+                text TEXT NOT NULL DEFAULT '',
+                body TEXT NOT NULL DEFAULT '',
+                meta TEXT,
+                deleted INTEGER NOT NULL DEFAULT 0,
+                deleted_by TEXT NOT NULL DEFAULT '',
+                deleted_ts REAL
+            )
+            """
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_activity_report "
+                     "ON activity(report_id, seq)")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS report_links (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                report_id TEXT NOT NULL,
+                linked_id TEXT NOT NULL,
+                UNIQUE(report_id, linked_id)
+            )
+            """
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_links_report "
+                     "ON report_links(report_id)")
+        _backfill_activity_tables(conn)
         ucols = [r[1] for r in conn.execute("PRAGMA table_info(users)")]
         if "display_name" not in ucols:
             conn.execute(
@@ -188,15 +224,12 @@ def add(report: dict) -> str:
             ),
         )
         # every ticket starts its append-only activity timeline with 'created'
-        conn.execute(
-            "UPDATE reports SET activity = ? WHERE id = ?",
-            (json.dumps([{
-                "seq": 1, "ts": created_ts, "kind": "created",
-                "actor": _safe_str(report.get("name"), "system", 80) or "system",
-                "role": "player", "text": "report created", "body": "",
-                "meta": None,
-            }]), rid),
-        )
+        _append_event(conn, rid, {
+            "ts": created_ts, "kind": "created",
+            "actor": _safe_str(report.get("name"), "system", 80) or "system",
+            "role": "player", "text": "report created", "body": "",
+            "meta": None,
+        })
     return rid
 
 
@@ -269,12 +302,82 @@ def _parse_reports(rows) -> list[dict]:
             d["analysis"] = json.loads(d.get("analysis") or "{}")
         except ValueError:
             d["analysis"] = {}
-        d["related"] = _json_list(d.get("related"), [])
         d["comments"] = _json_list(d.get("comments"), [])
-        d["activity"] = _json_list(d.get("activity"), [])
+        d["related"] = []
+        d["activity"] = []
         out.append(d)
+    _attach_history(out)
     _resolve_activity(out)
     return out
+
+
+def _attach_history(reports: list[dict]) -> None:
+    """Populate ``activity`` and ``related`` from their real tables."""
+    ids = [r["id"] for r in reports if r.get("id")]
+    if not ids:
+        return
+    marks = ",".join("?" for _ in ids)
+    with _lock, _connect() as conn:
+        rows = conn.execute(
+            f"SELECT report_id, seq, ts, kind, actor, actor_id, actor_type, "
+            f"role, text, body, meta, deleted, deleted_by, deleted_ts "
+            f"FROM activity WHERE report_id IN ({marks}) "
+            f"ORDER BY report_id, seq", ids).fetchall()
+        links = conn.execute(
+            f"SELECT report_id, linked_id FROM report_links "
+            f"WHERE report_id IN ({marks}) ORDER BY id", ids).fetchall()
+    by_act: dict = {}
+    for r in rows:
+        d = dict(r)
+        try:
+            d["meta"] = json.loads(d["meta"]) if d.get("meta") else None
+        except ValueError:
+            d["meta"] = None
+        d["deleted"] = bool(d.get("deleted"))
+        by_act.setdefault(d.pop("report_id"), []).append(d)
+    by_link: dict = {}
+    for r in links:
+        by_link.setdefault(r["report_id"], []).append(r["linked_id"])
+    for rep in reports:
+        rep["activity"] = by_act.get(rep["id"], [])
+        rep["related"] = by_link.get(rep["id"], [])
+
+
+def _backfill_activity_tables(conn) -> None:
+    """One-time move of legacy JSON activity/related into the real tables."""
+    rows = conn.execute("SELECT id, activity, related FROM reports").fetchall()
+    for r in rows:
+        rid = r["id"]
+        legacy = _json_list(r["activity"], [])
+        have = conn.execute(
+            "SELECT COUNT(*) FROM activity WHERE report_id = ?",
+            (rid,)).fetchone()[0]
+        if legacy and not have:
+            for i, e in enumerate(legacy, 1):
+                conn.execute(
+                    "INSERT OR IGNORE INTO activity (report_id, seq, ts, kind, "
+                    "actor, actor_id, actor_type, role, text, body, meta, "
+                    "deleted, deleted_by, deleted_ts) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (rid, int(e.get("seq") or i),
+                     float(e.get("ts") or time.time()),
+                     _safe_str(e.get("kind"), "", 32),
+                     _safe_str(e.get("actor"), "system", 80),
+                     e.get("actor_id"),
+                     _safe_str(e.get("actor_type"), "", 12),
+                     _safe_str(e.get("role"), "", 24),
+                     _safe_str(e.get("text"), "", 300),
+                     _safe_str(e.get("body"), "", 20000),
+                     json.dumps(e.get("meta"), ensure_ascii=False)
+                     if e.get("meta") is not None else None,
+                     1 if e.get("deleted") else 0,
+                     _safe_str(e.get("deleted_by"), "", 80),
+                     e.get("deleted_ts")))
+        for other in _json_list(r["related"], []):
+            if other:
+                conn.execute(
+                    "INSERT OR IGNORE INTO report_links (report_id, linked_id) "
+                    "VALUES (?, ?)", (rid, other))
 
 
 def list_reports(status: str | None = None, limit: int = 200) -> list[dict]:
@@ -308,26 +411,20 @@ def get_report(rid: str) -> dict | None:
 
 
 def _append_event(conn, rid: str, entry: dict) -> dict | None:
-    """Append an immutable activity entry (caller holds the connection).
-
-    Every entry gets an incrementing ``seq`` and timestamp; entries are never
-    mutated later except ``comment`` entries gaining ``deleted`` markers.
-    """
-    row = conn.execute("SELECT activity FROM reports WHERE id = ?",
-                       (rid,)).fetchone()
-    if row is None:
+    """Append an immutable activity row (caller holds the connection)."""
+    if conn.execute("SELECT 1 FROM reports WHERE id = ?", (rid,)).fetchone() is None:
         return None
-    act = _json_list(row[0], [])
+    nxt = conn.execute(
+        "SELECT COALESCE(MAX(seq), 0) + 1 FROM activity WHERE report_id = ?",
+        (rid,)).fetchone()[0]
     e = dict(entry)
-    e["seq"] = len(act) + 1
+    e["seq"] = int(nxt)
     e.setdefault("ts", time.time())
     e["actor"] = _safe_str(e.get("actor"), "system", 80)
     e["role"] = _safe_str(e.get("role"), "", 24)
     e["text"] = _safe_str(e.get("text"), "", 300)
     e["body"] = _safe_str(e.get("body"), "", 20000)
     e.setdefault("meta", None)
-    # structured actor: user events keep the id (names resolve at read time),
-    # machine events are typed so the UI can badge them (auto/system/player)
     e["actor_id"] = e.get("actor_id")
     if not e.get("actor_type"):
         if e.get("actor_id") is not None:
@@ -336,9 +433,15 @@ def _append_event(conn, rid: str, entry: dict) -> dict | None:
             e["actor_type"] = "auto"
         else:
             e["actor_type"] = "system"
-    act.append(e)
-    conn.execute("UPDATE reports SET activity = ? WHERE id = ?",
-                 (json.dumps(act, ensure_ascii=False), rid))
+    conn.execute(
+        "INSERT INTO activity (report_id, seq, ts, kind, actor, actor_id, "
+        "actor_type, role, text, body, meta) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (rid, e["seq"], e["ts"], _safe_str(e.get("kind"), "", 32), e["actor"],
+         e["actor_id"], e["actor_type"], e["role"], e["text"], e["body"],
+         json.dumps(e["meta"], ensure_ascii=False) if e["meta"] is not None else None),
+    )
+    e["deleted"] = False
     return e
 
 
@@ -365,27 +468,17 @@ def add_comment(rid: str, author: str, role: str, body: str,
 
 def delete_comment(rid: str, seq: int, actor: str = "system",
                    role: str = "", actor_id: int | None = None) -> bool:
-    """Mark a comment event as removed — append-only, nothing is erased.
-
-    The original comment stays in the timeline (flagged ``deleted``) and a
-    ``comment_removed`` event is appended so the audit trail is complete.
-    """
+    """Flag a comment as removed (append-only: the event stays)."""
     with _lock, _connect() as conn:
-        row = conn.execute("SELECT activity FROM reports WHERE id = ?",
-                           (rid,)).fetchone()
-        if row is None:
+        row = conn.execute(
+            "SELECT id, deleted FROM activity WHERE report_id = ? AND seq = ? "
+            "AND kind = 'comment'", (rid, seq)).fetchone()
+        if row is None or row["deleted"]:
             return False
-        act = _json_list(row[0], [])
-        target = next((e for e in act
-                       if e.get("seq") == seq and e.get("kind") == "comment"),
-                      None)
-        if target is None or target.get("deleted"):
-            return False
-        target["deleted"] = True
-        target["deleted_by"] = _safe_str(actor, "system", 80)
-        target["deleted_ts"] = time.time()
-        conn.execute("UPDATE reports SET activity = ? WHERE id = ?",
-                     (json.dumps(act, ensure_ascii=False), rid))
+        conn.execute(
+            "UPDATE activity SET deleted = 1, deleted_by = ?, deleted_ts = ? "
+            "WHERE id = ?", (_safe_str(actor, "system", 80), time.time(),
+                            row["id"]))
         _append_event(conn, rid, {
             "kind": "comment_removed",
             "text": f"removed comment #{seq}",
@@ -395,23 +488,23 @@ def delete_comment(rid: str, seq: int, actor: str = "system",
 
 def link_reports(a: str, b: str, actor: str = "system",
                  role: str = "", actor_id: int | None = None) -> None:
-    """Link two reports symmetrically and log it on both timelines."""
+    """Link two reports symmetrically (join table) and log both timelines."""
     with _lock, _connect() as conn:
-        rows = conn.execute(
-            "SELECT id, related FROM reports WHERE id IN (?, ?)", (a, b)
-        ).fetchall()
-        rel = {r["id"]: _json_list(r["related"], []) for r in rows}
         for rid, others in ((a, b), (b, a)):
-            lst = rel.get(rid, [])
-            if others not in lst:
-                lst.append(others)
-                conn.execute(
-                    "UPDATE reports SET related = ? WHERE id = ?",
-                    (json.dumps(lst[-12:], ensure_ascii=False), rid))
-                _append_event(conn, rid, {
-                    "kind": "link", "text": f"linked to #{others}",
-                    "actor": actor, "role": role,
-                    "meta": {"target": others}, "actor_id": actor_id})
+            cur = conn.execute(
+                "INSERT OR IGNORE INTO report_links (report_id, linked_id) "
+                "VALUES (?, ?)", (rid, others))
+            if not cur.rowcount:
+                continue
+            _append_event(conn, rid, {
+                "kind": "link", "text": f"linked to #{others}",
+                "actor": actor, "role": role,
+                "meta": {"target": others}, "actor_id": actor_id})
+            old_ids = conn.execute(
+                "SELECT id FROM report_links WHERE report_id = ? "
+                "ORDER BY id DESC LIMIT -1 OFFSET 12", (rid,)).fetchall()
+            for r in old_ids:
+                conn.execute("DELETE FROM report_links WHERE id = ?", (r["id"],))
 
 
 def update_status(rid: str, status: str, actor: str = "system",
