@@ -82,7 +82,10 @@ cannot be removed or demoted.
 fields are truncated and type-coerced before storage, admin cookies are
 constant-time verified (httponly + lax; set `BGBOX_COOKIE_SECURE=1` under
 https), the admin page escapes every rendered field (LLM output included),
-and every response gets nosniff/DENY/no-referrer headers. A small test suite
+and every response gets nosniff/DENY/no-referrer headers. Handled 4xx and
+5xx errors get a friendly error page in a browser (from `error_pages.py`),
+while requests to `/api/` and clients that send `Accept: application/json`
+keep their previous JSON or plain-text bodies. A small test suite
 lives in `tests/` (`python -m pytest tests/ -q`).
 
 In **Nginx Proxy Manager** create a Proxy Host:

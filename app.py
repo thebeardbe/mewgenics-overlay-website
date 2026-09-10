@@ -34,10 +34,12 @@ from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader, select_autoescape
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from api_utils import api_response as _api
 
 import admin_api
 import auth
+import error_pages
 import llm
 import store
 
@@ -173,33 +175,39 @@ if not GITHUB_ENABLED:
     logger.info("GitHub sign-in disabled (set GITHUB_CLIENT_ID and "
                 "GITHUB_CLIENT_SECRET to enable developer accounts).")
 
-# Log hardening: optional rotating log file with secrets scrubbed from every
-# record. Console logging stays untouched.
+# Log hardening: optional rotating log file. Only this file is scrubbed, the
+# console handler is not.
 LOG_FILE = os.environ.get("BGBOX_LOG_FILE", "")
 if LOG_FILE:
     from logging.handlers import RotatingFileHandler
 
-    class _Scrub(logging.Filter):
-        """Never write secrets/tokens into the log file."""
+    # The values that must never reach the file (short values would redact
+    # ordinary words, hence the length floor).
+    _LOG_SECRETS = [v for v in (COOKIE_KEY, ADMIN_PASS, GITHUB_CLIENT_SECRET)
+                    if v and len(v) >= 6]
+
+    class _ScrubFormatter(logging.Formatter):
+        """The single scrub point for the log file.
+
+        It scrubs the rendered line, not the record: the traceback is
+        appended by the formatter, and a parameterized call keeps its secret
+        in record.args, so the formatted string is the only place that holds
+        the values and the traceback together. A filter would also mutate the
+        shared record and leak the mangled form to the other handlers."""
 
         def __init__(self):
-            super().__init__()
-            self.secrets = [v for v in (COOKIE_KEY, ADMIN_PASS,
-                                        GITHUB_CLIENT_SECRET)
-                            if v and len(v) >= 6]
+            super().__init__(
+                "%(asctime)s %(levelname)s %(name)s: %(message)s")
 
-        def filter(self, record: logging.LogRecord) -> bool:
-            msg = record.getMessage()
-            for secret in self.secrets:
-                if secret in msg:
-                    record.msg = record.msg.replace(secret, "[redacted]")
-                    record.args = ()
-            return True
+        def format(self, record: logging.LogRecord) -> str:
+            line = super().format(record)
+            for secret in _LOG_SECRETS:
+                if secret in line:
+                    line = line.replace(secret, "[redacted]")
+            return line
 
     _fh = RotatingFileHandler(LOG_FILE, maxBytes=1_000_000, backupCount=5)
-    _fh.setFormatter(logging.Formatter(
-        "%(asctime)s %(levelname)s %(name)s: %(message)s"))
-    _fh.addFilter(_Scrub())
+    _fh.setFormatter(_ScrubFormatter())
     logger.addHandler(_fh)
 
 
@@ -227,30 +235,40 @@ def _csp_for(path: str) -> str:
 def _origin_allowed(request: Request) -> bool:
     """CSRF gate for state-changing requests, in decision order.
 
-    Sec-Fetch-Site is checked first because the browser controls it and a
-    cross-site attacker cannot forge it, so it still holds when privacy
-    settings make the browser serialize Origin as the literal "null":
-    same-origin and none (typed URL or bookmark) are allowed, cross-site is
-    rejected even if Origin happens to match. Anything else (same-site,
-    unknown, or absent: curl, the overlay's direct JSON POST) keeps the
-    legacy rule: no Origin header means allowed, otherwise the lowercased
-    Origin netloc must match BGBOX_ORIGINS when that list is non-empty, else
-    the request Host. A literal Origin: null (empty netloc) stays rejected.
+    First the BGBOX_ORIGINS allowlist, explicit operator configuration: an
+    Origin whose netloc is listed is admitted whatever Sec-Fetch-Site says,
+    cross-site included. The Origin header is browser-controlled, so this
+    only admits the origins the operator chose.
+
+    An Origin outside the allowlist goes to the fetch metadata, which the
+    browser also controls, so it still holds when privacy settings make the
+    browser serialize Origin as the literal "null": same-origin and none
+    (typed URL or bookmark) are allowed, cross-site is rejected. Anything
+    else (same-site, unknown, or absent: curl, the overlay's direct JSON
+    POST) keeps the legacy rule: no Origin header means allowed, and an
+    Origin netloc must be in BGBOX_ORIGINS when that list is set, else match
+    the request Host. That allowlist exclusivity only applies to a request
+    carrying no trustworthy fetch metadata, which is why this app's own
+    forms are still admitted when the list is set and does not list them. A
+    literal Origin: null (empty netloc) stays rejected.
     """
-    site = (request.headers.get("sec-fetch-site") or "").strip().lower()
     origin = request.headers.get("origin")
-    if site in ("same-origin", "none"):
+    site = (request.headers.get("sec-fetch-site") or "").strip().lower()
+    host = urllib.parse.urlsplit(origin).netloc.lower() if origin else ""
+    if host and host in _ALLOWED_ORIGINS:
+        ok = True
+    elif site in ("same-origin", "none"):
         ok = True
     elif site == "cross-site":
         ok = False
     elif not origin:                  # non-browser clients (curl, tests)
         ok = True
+    # Trustworthy fetch metadata was decided above, so for the rest the
+    # allowlist is exclusive: matching this app's own Host is not enough.
+    elif _ALLOWED_ORIGINS:
+        ok = False
     else:
-        host = urllib.parse.urlsplit(origin).netloc.lower()
-        if _ALLOWED_ORIGINS:
-            ok = bool(host) and host in _ALLOWED_ORIGINS
-        else:
-            ok = bool(host) and host == (request.headers.get("host") or "").lower()
+        ok = bool(host) and host == (request.headers.get("host") or "").lower()
     if not ok:
         logger.warning(
             "cross-origin request rejected: %s %s origin=%r sec-fetch-site=%r "
@@ -260,28 +278,13 @@ def _origin_allowed(request: Request) -> bool:
     return ok
 
 
-@app.middleware("http")
-async def _hardening(request: Request, call_next):
-    """Payload cap + CSRF origin gate + security headers on every response."""
-    cl = request.headers.get("content-length")
-    if cl and cl.isdigit() and int(cl) > MAX_BODY_BYTES:
-        return Response("payload too large", status_code=413)
-    if request.method in ("POST", "PUT", "PATCH", "DELETE"):
-        if not _origin_allowed(request):
-            return JSONResponse({"error": "cross-origin request rejected"},
-                                status_code=403)
-        _token = request.cookies.get("bugbox_admin")
-        _path = request.url.path
-        _public = _path in ("/submit", "/api/report", "/login")
-        if _token and not _public:
-            _sess = store.session_user(_token)
-            _stored = (_sess or {}).get("csrf") or ""
-            if _stored:
-                _sent = request.headers.get("x-bugbox-csrf") or ""
-                if not store.hmac_compare(_sent, _stored):
-                    return JSONResponse({"error": "csrf check failed"},
-                                        status_code=403)
-    resp = await call_next(request)
+def _security_headers(request: Request, resp: Response) -> Response:
+    """Add the security headers to *resp*, never overwriting what it has.
+
+    The error path calls this too, because the middleware's own early returns
+    and the 500 never pass back through it. `setdefault` keeps a header a
+    handler supplied, such as a 405's `Allow`; HSTS stays gated on HTTPS.
+    """
     resp.headers.setdefault("X-Content-Type-Options", "nosniff")
     resp.headers.setdefault("X-Frame-Options", "DENY")
     resp.headers.setdefault("Referrer-Policy", "no-referrer")
@@ -296,6 +299,34 @@ async def _hardening(request: Request, call_next):
             "Strict-Transport-Security",
             "max-age=31536000; includeSubDomains")
     return resp
+
+
+@app.middleware("http")
+async def _hardening(request: Request, call_next):
+    """Payload cap + CSRF origin gate + security headers on every response."""
+    cl = request.headers.get("content-length")
+    if cl and cl.isdigit() and int(cl) > MAX_BODY_BYTES:
+        return _error_response(request, 413)
+    if request.method in ("POST", "PUT", "PATCH", "DELETE"):
+        if not _origin_allowed(request):
+            return _error_response(
+                request, 403,
+                JSONResponse({"error": "cross-origin request rejected"},
+                             status_code=403))
+        _token = request.cookies.get("bugbox_admin")
+        _path = request.url.path
+        _public = _path in ("/submit", "/api/report", "/login")
+        if _token and not _public:
+            _sess = store.session_user(_token)
+            _stored = (_sess or {}).get("csrf") or ""
+            if _stored:
+                _sent = request.headers.get("x-bugbox-csrf") or ""
+                if not store.hmac_compare(_sent, _stored):
+                    return _error_response(
+                        request, 403,
+                        JSONResponse({"error": "csrf check failed"},
+                                     status_code=403))
+    return _security_headers(request, await call_next(request))
 
 
 def _client_ip(request: Request) -> str:
@@ -340,9 +371,51 @@ def _logout_cookie(resp: Response, request: Request) -> None:
     resp.delete_cookie("bugbox_admin")
 
 
+def _render_html(name: str, **ctx) -> str:
+    """Render a template to a string (autoescaped, cached)."""
+    return JINJA.get_template(name).render(**ctx)
+
+
 def _render(name: str, **ctx) -> HTMLResponse:
     """Render a template through Jinja2 (autoescaped, cached)."""
-    return HTMLResponse(JINJA.get_template(name).render(**ctx))
+    return HTMLResponse(_render_html(name, **ctx))
+
+
+# ── friendly error pages ──────────────────────────────────────────────────
+# The copy and the API/JSON carve-out live in error_pages.py; the wiring and
+# the app-specific bodies (the two 403s, the report 429) stay here.
+
+def _error_response(request: Request, code: int,
+                    fallback: Response | None = None,
+                    headers: dict | None = None) -> Response:
+    """Error page for a browser, today's exact response for an API client.
+
+    Every error response carries the baseline CSP, not the strict one a
+    normal /admin/ or /login/ response gets: the error page is only static
+    copy plus an integer code, no scripts, no user-supplied content, and its
+    styling is the inline <style> block in base_public.html that the strict
+    policy would drop, which left a mistyped admin URL unstyled.
+    """
+    resp = error_pages.render_error(request, code, fallback,
+                                    render=_render_html, headers=headers)
+    resp.headers["Content-Security-Policy"] = _CSP_BASELINE
+    return _security_headers(request, resp)
+
+
+@app.exception_handler(404)
+@app.exception_handler(405)
+async def _routing_error(request: Request,
+                         exc: StarletteHTTPException) -> Response:
+    """404/405 used to reach a browser as raw JSON."""
+    return _error_response(request, exc.status_code, headers=exc.headers)
+
+
+@app.exception_handler(Exception)
+async def _server_error(request: Request, exc: Exception) -> Response:
+    """500: log the traceback, show a page that leaks nothing from it."""
+    logger.error("unhandled error on %s %s", request.method,
+                 request.url.path, exc_info=exc)
+    return _error_response(request, 500)
 
 
 
@@ -450,9 +523,11 @@ def submit(
     contact: str = Form(""),
 ):
     if _throttled(f"report:{_client_ip(request)}", *REPORT_RATE_LIMIT):
-        return JSONResponse(
-            {"error": "too many reports, try again in a minute"},
-            status_code=429)
+        return _error_response(
+            request, 429,
+            JSONResponse(
+                {"error": "too many reports, try again in a minute"},
+                status_code=429))
     rid = store.add({
         "category": category, "title": title, "body": body,
         "log": log, "name": name, "contact": contact,
