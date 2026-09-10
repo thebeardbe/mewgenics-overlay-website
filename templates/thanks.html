@@ -1,5 +1,9 @@
+{% extends "base_public.html" %}
+{% block title %}Thanks{% endblock %}
+{% block content %}
 <div class="card center">
   <h1>Got it, thanks! 🐈</h1>
-  <p>Your report <code>{rid}</code> is in. The developer reads every one.</p>
+  <p>Your report <code>{{ rid }}</code> is in. The developer reads every one.</p>
   <p><a href="/report">Report another problem</a></p>
 </div>
+{% endblock %}

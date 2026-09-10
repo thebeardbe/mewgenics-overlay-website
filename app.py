@@ -32,6 +32,7 @@ from pathlib import Path
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
+from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 import llm
 import store
@@ -41,6 +42,11 @@ app = FastAPI(title="Bugbox")
 
 logger = logging.getLogger("bugbox")
 TEMPLATES = Path(__file__).parent / "templates"
+JINJA = Environment(
+    loader=FileSystemLoader(str(Path(__file__).parent / "templates")),
+    autoescape=select_autoescape(["html"]),
+    cache_size=200,
+)
 STATIC_DIR = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR), check_dir=False),
           name="static")
@@ -336,22 +342,11 @@ def home():
     return _render("index.html", version=latest_version())
 
 
-def _public_page(fragment: str, title: str, active: str = "", **ctx) -> HTMLResponse:
-    """A public page: shared menu/footer (public_frame.html) around a content
-    fragment, so /report feels like the same site as the landing page."""
-    frame = (TEMPLATES / "public_frame.html").read_text(encoding="utf-8")
-    body = (TEMPLATES / fragment).read_text(encoding="utf-8")
-    html = frame.replace("{body}", body, 1)
-    ctx["title"] = title
-    ctx["active"] = active
-
-    def _sub(m):
-        key = m.group(1)
-        return str(ctx.get(key, m.group(0)))
-
-    html = re.sub(r"\{(\w+)\}", _sub, html)
-    return HTMLResponse(html)
-
+def _public_page(template: str, title: str = "", active: str = "",
+                   **ctx) -> HTMLResponse:
+    """Render a public page through Jinja2 (autoescaped, cached templates)."""
+    ctx["nav_active"] = active
+    return HTMLResponse(JINJA.get_template(template).render(**ctx))
 
 @app.get("/report", response_class=HTMLResponse)
 def report_page():

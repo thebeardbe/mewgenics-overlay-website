@@ -1,8 +1,11 @@
+{% extends "base_public.html" %}
+{% block title %}Report a problem{% endblock %}
+{% block content %}
 <div class="card">
   <h1>Report a problem <small>Mewgenics Breeding Overlay · open source &amp; read-only.
     Reports go straight to the developer.</small></h1>
 
-  <form method="post" action="{report_url}">
+  <form method="post" action="/submit">
     <div class="row">
       <div>
         <label for="category">What kind of problem?</label>
@@ -29,11 +32,12 @@
     <textarea id="body" name="body" placeholder="What did you expect, what did you see? Any steps to reproduce."></textarea>
 
     <label for="log">Debug info / log paste (optional but very helpful)
-      <span class="hint">Use the “Copy debug info” button in the overlay's About box,
+      <span class="hint">Use the "Copy debug info" button in the overlay's About box,
       then paste here. If it crashed, the log file sits next to the app
-      (<code>overlay.log</code>) · paste the tail of it.</span></label>
+      (<code>overlay.log</code>) - paste the tail of it.</span></label>
     <textarea id="log" name="log" placeholder="Paste debug info here…"></textarea>
 
     <button type="submit">Send report</button>
   </form>
 </div>
+{% endblock %}

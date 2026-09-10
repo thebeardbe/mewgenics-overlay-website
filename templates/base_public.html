@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{title} · Mewgenics Breeding Overlay</title>
+<title>{% block title %}Mewgenics Breeding Overlay{% endblock %}</title>
 <style>
   :root { --bg:#14120f; --card:#1e1b16; --card2:#262219; --line:#3a3429;
           --text:#ece7dc; --muted:#a49f92; --accent:#c62828; --accent2:#e8a33d;
@@ -54,13 +54,13 @@
       <a href="/#features">Features</a>
       <a href="/#safety">Safety</a>
       <a href="/#faq">FAQ</a>
-      <a href="/report" class="{active}">Feedback</a>
+      <a href="/report" class="{{ nav_active }}">Feedback</a>
     </span>
   </nav>
 </div></header>
-<main class="page">{body}</main>
+<main class="page">{% block content %}{% endblock %}</main>
 <footer><div class="wrap">
-  <p><b>Mewgenics Breeding Overlay</b> · free · MIT · read-only ·
+  <p><b>Mewgenics Breeding Overlay</b> - free · MIT · read-only ·
     <a href="https://github.com/thebeardbe/mewgenics-breeding-overlay">source</a></p>
   <p>Parser/genetics: <a href="https://github.com/frankieg33/MewgenicsBreedingManager">MewgenicsBreedingManager</a>
   (MIT) · <a href="https://store.steampowered.com/app/686060/">Mewgenics</a> on Steam</p>
