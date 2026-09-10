@@ -630,3 +630,29 @@ def test_static_admin_assets_are_served():
         text = open(f"templates/{name}", encoding="utf-8").read()
         assert "<style>" not in text and "<script>" not in text
         assert f'<link rel="stylesheet" href="/static/css/{name.replace(".html","")}.css">' in text
+
+
+# ── batch1: session expiry, status 404, bucket/expiry pruning ──────────────
+def test_expired_session_is_rejected_and_deleted():
+    owner = [u for u in store.list_users() if u["role"] == "owner"][0]
+    token = store.create_session(owner["id"])
+    assert store.session_user(token) is not None
+    # force expiry by rewinding the row's expires timestamp
+    with store._lock:
+        conn = store._connect()
+        try:
+            conn.execute("UPDATE sessions SET expires = ? WHERE token = ?",
+                         (time.time() - 10, token))
+            conn.commit()
+        finally:
+            conn.close()
+    rows = store.prune_expired_sessions()
+    assert rows >= 1
+    assert store.session_user(token) is None   # expired -> rejected
+
+
+def test_api_status_returns_404_for_unknown_ticket():
+    logged = _login_client()
+    r = logged.post("/api/tickets/nope/status",
+                    data={"status": "triaged"}, headers=ADMIN)
+    assert r.status_code == 404

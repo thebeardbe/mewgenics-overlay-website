@@ -80,8 +80,32 @@ LOGIN_RATE_LIMIT = (5, 60)
 # In-memory per-IP rate buckets (restart resets them; fine for self-hosting).
 _buckets: dict = {}
 _bucket_lock = threading.Lock()
+_BUCKET_TTL = 600.0          # rate buckets older than this get swept
+
+
+def _prune_buckets(now=None) -> int:
+    """Drop rate-limit buckets that have gone stale (unbounded memory guard)."""
+    now = time.monotonic() if now is None else now
+    with _bucket_lock:
+        stale = [k for k, (ts, _v) in _buckets.items() if now - ts > _BUCKET_TTL]
+        for k in stale:
+            del _buckets[k]
+        return len(stale)
+
+
+def _maintenance_loop() -> None:
+    while True:
+        time.sleep(600)
+        try:
+            _prune_buckets()
+            store.prune_expired_sessions()
+        except Exception:
+            logger.exception("maintenance sweep failed")
+
 
 store.ensure_owner(ADMIN_USER, ADMIN_PASS, ADMIN_NAME)
+threading.Thread(target=_maintenance_loop, name="bugbox-maintenance",
+                 daemon=True).start()
 
 if not ADMIN_PASS:
     logger.warning("BGBOX_ADMIN_PASS is not set; the local owner login is "
@@ -195,6 +219,8 @@ def _client_ip(request: Request) -> str:
 
 def _throttled(key: str, limit: int, window: float) -> bool:
     """True when *key* has exceeded *limit* hits in *window* seconds."""
+    if len(_buckets) > 2000:
+        _prune_buckets()
     now = time.monotonic()
     with _bucket_lock:
         bucket = _buckets.get(key)
@@ -592,6 +618,8 @@ def api_status(request: Request, rid: str, status: str = Form("")):
     if user is None:
         return JSONResponse({"error": "unauthorized"}, status_code=401)
     if status in {"open", "triaged", "fixed", "wontfix", "duplicate"}:
+        if not store.exists(rid):
+            return JSONResponse({"error": "not found"}, status_code=404)
         store.update_status(rid, status,
                             actor=(user.get("username") or user.get("github_login") or "admin"),
                             role=user.get("role") or "",

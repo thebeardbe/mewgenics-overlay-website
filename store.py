@@ -8,6 +8,7 @@ accounts that start as `pending` until the owner approves them.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import os
 import sqlite3
@@ -132,10 +133,15 @@ def init() -> None:
             CREATE TABLE IF NOT EXISTS sessions (
                 token TEXT PRIMARY KEY,
                 user_id INTEGER NOT NULL,
-                created REAL NOT NULL
+                created REAL NOT NULL,
+                expires REAL NOT NULL DEFAULT 0
             )
             """
         )
+        scol = [r[1] for r in conn.execute("PRAGMA table_info(sessions)")]
+        if "expires" not in scol:
+            conn.execute(
+                "ALTER TABLE sessions ADD COLUMN expires REAL NOT NULL DEFAULT 0")
         ucols = [r[1] for r in conn.execute("PRAGMA table_info(users)")]
         if "display_name" not in ucols:
             conn.execute(
@@ -145,7 +151,7 @@ def init() -> None:
 
 # ── reports (unchanged API) ────────────────────────────────────────────────
 
-def _s(value, default: str = "", maxlen: int = 0) -> str:
+def _safe_str(value, default: str = "", maxlen: int = 0) -> str:
     """Coerce an untrusted report field to a bounded string."""
     if isinstance(value, bool):
         value = "1" if value else "0"
@@ -167,14 +173,14 @@ def add(report: dict) -> str:
             """,
             (
                 rid, created_ts, "open",
-                _s(report.get("category"), "other", 40),
-                _s(report.get("name"), "", 80),
-                _s(report.get("contact"), "", 160),
-                _s(report.get("title"), "Untitled", 160),
-                _s(report.get("body"), "", 200_000),
-                _s(report.get("log"), "", 200_000),
-                _s(report.get("app_version"), "", 32),
-                _s(report.get("game_patch"), "", 64),
+                _safe_str(report.get("category"), "other", 40),
+                _safe_str(report.get("name"), "", 80),
+                _safe_str(report.get("contact"), "", 160),
+                _safe_str(report.get("title"), "Untitled", 160),
+                _safe_str(report.get("body"), "", 200_000),
+                _safe_str(report.get("log"), "", 200_000),
+                _safe_str(report.get("app_version"), "", 32),
+                _safe_str(report.get("game_patch"), "", 64),
             ),
         )
         # every ticket starts its append-only activity timeline with 'created'
@@ -182,7 +188,7 @@ def add(report: dict) -> str:
             "UPDATE reports SET activity = ? WHERE id = ?",
             (json.dumps([{
                 "seq": 1, "ts": created_ts, "kind": "created",
-                "actor": _s(report.get("name"), "system", 80) or "system",
+                "actor": _safe_str(report.get("name"), "system", 80) or "system",
                 "role": "player", "text": "report created", "body": "",
                 "meta": None,
             }]), rid),
@@ -199,6 +205,15 @@ def set_analysis(rid: str, analysis: dict) -> None:
             (json.dumps(analysis, ensure_ascii=False), rid),
         )
 
+
+
+def prune_expired_sessions(now=None) -> int:
+    """Delete server-side-expired sessions; returns rows removed."""
+    now = time.time() if now is None else now
+    with _lock, _connect() as conn:
+        cur = conn.execute(
+            "DELETE FROM sessions WHERE expires < ? AND expires > 0", (now,))
+        return cur.rowcount
 
 def _json_list(value, default):
     try:
@@ -302,10 +317,10 @@ def _append_event(conn, rid: str, entry: dict) -> dict | None:
     e = dict(entry)
     e["seq"] = len(act) + 1
     e.setdefault("ts", time.time())
-    e["actor"] = _s(e.get("actor"), "system", 80)
-    e["role"] = _s(e.get("role"), "", 24)
-    e["text"] = _s(e.get("text"), "", 300)
-    e["body"] = _s(e.get("body"), "", 20000)
+    e["actor"] = _safe_str(e.get("actor"), "system", 80)
+    e["role"] = _safe_str(e.get("role"), "", 24)
+    e["text"] = _safe_str(e.get("text"), "", 300)
+    e["body"] = _safe_str(e.get("body"), "", 20000)
     e.setdefault("meta", None)
     # structured actor: user events keep the id (names resolve at read time),
     # machine events are typed so the UI can badge them (auto/system/player)
@@ -340,7 +355,7 @@ def add_comment(rid: str, author: str, role: str, body: str,
     with _lock, _connect() as conn:
         return _append_event(conn, rid, {
             "kind": "comment", "text": "", "actor": author,
-            "role": role, "body": _s(body, "", 20000),
+            "role": role, "body": _safe_str(body, "", 20000),
             "actor_id": actor_id})
 
 
@@ -363,7 +378,7 @@ def delete_comment(rid: str, seq: int, actor: str = "system",
         if target is None or target.get("deleted"):
             return False
         target["deleted"] = True
-        target["deleted_by"] = _s(actor, "system", 80)
+        target["deleted_by"] = _safe_str(actor, "system", 80)
         target["deleted_ts"] = time.time()
         conn.execute("UPDATE reports SET activity = ? WHERE id = ?",
                      (json.dumps(act, ensure_ascii=False), rid))
@@ -485,7 +500,6 @@ def verify_password(password: str, stored: str) -> bool:
 
 def hmac_compare(a: str, b: str) -> bool:
     """Constant-time string compare."""
-    import hmac
     return hmac.compare_digest(a, b)
 
 
@@ -575,10 +589,17 @@ def create_github_user(github_id: str, github_login: str,
             row = conn.execute(
                 "SELECT " + _COLS_USR + " FROM users WHERE id = ?", (existing["id"],)).fetchone()
         else:
-            conn.execute(
-                "INSERT INTO users (username, github_id, github_login, role, "
-                "status, created) VALUES (?, ?, ?, 'admin', ?, ?)",
-                (username, github_id, github_login, status, now))
+            try:
+                conn.execute(
+                    "INSERT INTO users (username, github_id, github_login, role, "
+                    "status, created) VALUES (?, ?, ?, 'admin', ?, ?)",
+                    (username, github_id, github_login, status, now))
+            except sqlite3.IntegrityError:
+                # Lost a race with another worker for the same GitHub login:
+                # adopt the existing row instead of surfacing a raw 500.
+                conn.execute(
+                    "UPDATE users SET github_id = ? "
+                    "WHERE github_login = ?", (github_id, github_login))
             row = conn.execute(
                 "SELECT " + _COLS_USR + " FROM users WHERE github_id = ?", (github_id,)
             ).fetchone()
@@ -625,12 +646,16 @@ def list_users() -> list[dict]:
     return [dict(r) for r in rows]
 
 
+SESSION_TTL = 60 * 60 * 24 * 30   # server-side session lifetime
+
+
 def create_session(user_id: int) -> str:
     token = uuid.uuid4().hex + uuid.uuid4().hex
     with _lock, _connect() as conn:
         conn.execute(
-            "INSERT INTO sessions (token, user_id, created) VALUES (?, ?, ?)",
-            (token, user_id, time.time()))
+            "INSERT INTO sessions (token, user_id, created, expires) "
+            "VALUES (?, ?, ?, ?)",
+            (token, user_id, time.time(), time.time() + SESSION_TTL))
     return token
 
 
@@ -639,8 +664,12 @@ def session_user(token: str | None) -> dict | None:
         return None
     with _lock, _connect() as conn:
         row = conn.execute(
-            "SELECT " + _USR_JOIN + " FROM sessions s JOIN users u ON u.id = s.user_id "
+            "SELECT s.expires, " + _USR_JOIN +
+            " FROM sessions s JOIN users u ON u.id = s.user_id "
             "WHERE s.token = ?", (token,)).fetchone()
+        if row is not None and float(row[0] or 0) < time.time():
+            conn.execute("DELETE FROM sessions WHERE token = ?", (token,))
+            return None
     return dict(row) if row else None
 
 
