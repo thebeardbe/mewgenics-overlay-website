@@ -82,6 +82,14 @@ and reports still land in the admin queue.
 - Admin UI lists every report with its tags, log tail, and one-click
   status moves (triaged / fixed / duplicate / wontfix / delete).
 
+## Data retention
+
+- Sessions expire server-side after 30 days and are pruned by a
+  maintenance sweep; stale rate-limit buckets are swept too.
+- Reports (and their activity timelines) are kept indefinitely by
+  design: this is a small self-hosted tool and the history is the
+  point. Delete a report from the admin UI if you want it gone.
+
 ## API summary
 
 | Route | Purpose |
