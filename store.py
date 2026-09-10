@@ -252,12 +252,27 @@ def prune_expired_sessions(now=None) -> int:
             "DELETE FROM sessions WHERE expires < ? AND expires > 0", (now,))
         return cur.rowcount
 
-def _json_list(value, default):
-    try:
-        data = json.loads(value) if value else default
-    except ValueError:
+def _load_json_col(value, default):
+    """Parse a JSON column, always failing safe to a value of the same type.
+
+    One place enforces the invariant instead of five copy-pasted try/excepts
+    (the next contributor cannot forget the fallback).
+    """
+    if not value:
         return default
-    return data if isinstance(data, list) else default
+    try:
+        parsed = json.loads(value)
+    except (TypeError, ValueError):
+        return default
+    if isinstance(default, dict):
+        return parsed if isinstance(parsed, dict) else default
+    if isinstance(default, list):
+        return parsed if isinstance(parsed, list) else default
+    return parsed if parsed is not None else default
+
+
+def _json_list(value, default):
+    return _load_json_col(value, default if isinstance(default, list) else [])
 
 
 def _user_display_map(ids) -> dict:
@@ -298,10 +313,7 @@ def _parse_reports(rows) -> list[dict]:
     out = []
     for r in rows:
         d = dict(r)
-        try:
-            d["analysis"] = json.loads(d.get("analysis") or "{}")
-        except ValueError:
-            d["analysis"] = {}
+        d["analysis"] = _load_json_col(d.get("analysis"), {})
         d["comments"] = _json_list(d.get("comments"), [])
         d["related"] = []
         d["activity"] = []
@@ -329,10 +341,7 @@ def _attach_history(reports: list[dict]) -> None:
     by_act: dict = {}
     for r in rows:
         d = dict(r)
-        try:
-            d["meta"] = json.loads(d["meta"]) if d.get("meta") else None
-        except ValueError:
-            d["meta"] = None
+        d["meta"] = _load_json_col(d.get("meta"), None)
         d["deleted"] = bool(d.get("deleted"))
         by_act.setdefault(d.pop("report_id"), []).append(d)
     by_link: dict = {}
@@ -548,12 +557,7 @@ def set_tags(rid: str, severity: str | None, category: str | None,
             (rid,)).fetchone()
         if row is None:
             return
-        try:
-            analysis = json.loads(row[0] or "{}")
-        except ValueError:
-            analysis = {}
-        if not isinstance(analysis, dict):
-            analysis = {}
+        analysis = _load_json_col(row[0], {})
         old_sev = analysis.get("severity")
         old_cat = analysis.get("category") or row[1]
         if severity:
