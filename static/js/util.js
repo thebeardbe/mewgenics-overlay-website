@@ -27,3 +27,11 @@ function esc(s) {
     '"': "&quot;", "'": "&#39;",
   }[c]));
 }
+
+// Normalise API error payloads (string or {error:{code,message}}).
+function errText(data) {
+  const e = data && data.error;
+  if (!e) return "unknown error";
+  if (typeof e === "string") return e;
+  return e.message || e.code || "error";
+}

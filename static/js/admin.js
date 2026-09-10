@@ -159,7 +159,7 @@ el.addEventListener("click", async (e) => {
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: "body=" + encodeURIComponent(body),
     });
-    if (!r.ok) alert("Comment failed: " + (await r.json()).error);
+    if (!r.ok) alert("Comment failed: " + errText(await r.json()));
     load();
     return;
   }
@@ -170,7 +170,7 @@ el.addEventListener("click", async (e) => {
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: "index=" + delCmt.dataset.delCmt,
     });
-    if (!r.ok) alert("Delete failed: " + (await r.json()).error);
+    if (!r.ok) alert("Delete failed: " + errText(await r.json()));
     load();
     return;
   }
@@ -186,7 +186,7 @@ el.addEventListener("click", async (e) => {
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: body.toString(),
     });
-    if (!r.ok) alert("Save failed: " + (await r.json()).error);
+    if (!r.ok) alert("Save failed: " + errText(await r.json()));
     else {
       const ok = bar.querySelector(".tagsaved");
       ok.hidden = false;
@@ -233,7 +233,7 @@ el.addEventListener("click", async (e) => {
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: "target=" + encodeURIComponent(target.trim()),
     });
-    if (!r.ok) alert("Link failed: " + (await r.json()).error);
+    if (!r.ok) alert("Link failed: " + errText(await r.json()));
     load();
     return;
   }

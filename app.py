@@ -308,6 +308,14 @@ def _logout_cookie(resp: Response, request: Request) -> None:
     resp.delete_cookie("bugbox_admin")
 
 
+def _api(payload, code: int = 200):
+    """JSON API response with a consistent error envelope:
+    {"error": {"code": "400", "message": "..."}}."""
+    if isinstance(payload, dict) and isinstance(payload.get("error"), str):
+        payload = {"error": {"code": str(code), "message": payload["error"]}}
+    return JSONResponse(payload, status_code=code)
+
+
 def _render(name: str, **ctx) -> HTMLResponse:
     """Render a template through Jinja2 (autoescaped, cached)."""
     return HTMLResponse(JINJA.get_template(name).render(**ctx))
@@ -439,7 +447,7 @@ async def api_report(request: Request):
     try:
         data = await request.json()
     except Exception:
-        return JSONResponse({"error": "expected JSON body"}, status_code=400)
+        return _api({"error": "expected JSON body"}, 400)
     if not isinstance(data, dict):
         return JSONResponse({"error": "expected a JSON object"},
                             status_code=400)
@@ -586,7 +594,7 @@ def people_page(request: Request):
 def api_tickets(request: Request, status: str | None = None,
                 limit: int = 50, offset: int = 0):
     if _current_user(request) is None:
-        return JSONResponse({"error": "unauthorized"}, status_code=401)
+        return _api({"error": "unauthorized"}, 401)
     limit = max(1, min(int(limit), 200))
     offset = max(0, int(offset))
     tickets = store.list_reports(status, limit=limit, offset=offset)
@@ -599,10 +607,10 @@ def api_ticket_detail(request: Request, rid: str):
     """Full ticket incl. the heavy body/log columns — the list endpoint never
     ships those, so the admin UI fetches them lazily on expand."""
     if _current_user(request) is None:
-        return JSONResponse({"error": "unauthorized"}, status_code=401)
+        return _api({"error": "unauthorized"}, 401)
     rep = store.get_report(rid)
     if rep is None:
-        return JSONResponse({"error": "not found"}, status_code=404)
+        return _api({"error": "not found"}, 404)
     return rep
 
 
@@ -610,17 +618,17 @@ def api_ticket_detail(request: Request, rid: str):
 def api_status(request: Request, rid: str, status: str = Form("")):
     user = _current_user(request)
     if user is None:
-        return JSONResponse({"error": "unauthorized"}, status_code=401)
+        return _api({"error": "unauthorized"}, 401)
     payload, code = admin_api.set_status(user, rid, status)
-    return JSONResponse(payload, status_code=code)
+    return _api(payload, code)
 
 
 @app.post("/api/tickets/{rid}/delete")
 def api_delete(request: Request, rid: str):
     if _current_user(request) is None:
-        return JSONResponse({"error": "unauthorized"}, status_code=401)
+        return _api({"error": "unauthorized"}, 401)
     payload, code = admin_api.delete_ticket(rid)
-    return JSONResponse(payload, status_code=code)
+    return _api(payload, code)
 
 
 @app.post("/api/tickets/{rid}/tags")
@@ -628,45 +636,45 @@ def api_tags(request: Request, rid: str,
              severity: str = Form(""), category: str = Form("")):
     user = _current_user(request)
     if user is None:
-        return JSONResponse({"error": "unauthorized"}, status_code=401)
+        return _api({"error": "unauthorized"}, 401)
     payload, code = admin_api.set_tags(user, rid, severity, category)
-    return JSONResponse(payload, status_code=code)
+    return _api(payload, code)
 
 
 @app.post("/api/tickets/{rid}/comments")
 def api_comment_add(request: Request, rid: str, body: str = Form("")):
     user = _current_user(request)
     if user is None:
-        return JSONResponse({"error": "unauthorized"}, status_code=401)
+        return _api({"error": "unauthorized"}, 401)
     payload, code = admin_api.add_comment(user, rid, body)
-    return JSONResponse(payload, status_code=code)
+    return _api(payload, code)
 
 
 @app.post("/api/tickets/{rid}/comments/delete")
 def api_comment_delete(request: Request, rid: str, index: int = Form(0)):
     user = _current_user(request)
     if user is None:
-        return JSONResponse({"error": "unauthorized"}, status_code=401)
+        return _api({"error": "unauthorized"}, 401)
     payload, code = admin_api.delete_comment(user, rid, index)
-    return JSONResponse(payload, status_code=code)
+    return _api(payload, code)
 
 
 @app.post("/api/tickets/{rid}/link")
 def api_ticket_link(request: Request, rid: str, target: str = Form("")):
     user = _current_user(request)
     if user is None:
-        return JSONResponse({"error": "unauthorized"}, status_code=401)
+        return _api({"error": "unauthorized"}, 401)
     payload, code = admin_api.link_tickets(user, rid, target)
-    return JSONResponse(payload, status_code=code)
+    return _api(payload, code)
 
 
 # people management (owner only)
 def _require_owner(request: Request):
     user = _current_user(request)
     if user is None:
-        return None, JSONResponse({"error": "unauthorized"}, status_code=401)
+        return None, _api({"error": "unauthorized"}, 401)
     if user.get("role") != "owner":
-        return None, JSONResponse({"error": "owner only"}, status_code=403)
+        return None, _api({"error": "owner only"}, 403)
     return user, None
 
 
@@ -684,7 +692,7 @@ def api_users_github(request: Request, login: str = Form("")):
     if err:
         return err
     payload, status = admin_api.preapprove(login)
-    return JSONResponse(payload, status_code=status)
+    return _api(payload, status)
 
 
 @app.post("/api/users/{uid}/status")
@@ -694,7 +702,7 @@ def api_user_status(request: Request, uid: int,
     if err:
         return err
     payload, code = admin_api.change_status(user, uid, status)
-    return JSONResponse(payload, status_code=code)
+    return _api(payload, code)
 
 
 @app.post("/api/users/{uid}/display-name")
@@ -706,7 +714,7 @@ def api_user_display_name(request: Request, uid: int,
     if err:
         return err
     payload, code = admin_api.rename(user, uid, name)
-    return JSONResponse(payload, status_code=code)
+    return _api(payload, code)
 
 
 @app.post("/api/users/{uid}/delete")
@@ -715,5 +723,5 @@ def api_user_delete(request: Request, uid: int):
     if err:
         return err
     payload, code = admin_api.remove(uid)
-    return JSONResponse(payload, status_code=code)
+    return _api(payload, code)
 
