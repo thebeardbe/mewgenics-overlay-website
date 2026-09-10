@@ -225,15 +225,39 @@ def _csp_for(path: str) -> str:
 
 
 def _origin_allowed(request: Request) -> bool:
-    """CSRF gate: state-changing requests must come from a same-origin (or
-    explicitly allow-listed) Origin when the browser sends one."""
+    """CSRF gate for state-changing requests, in decision order.
+
+    Sec-Fetch-Site is checked first because the browser controls it and a
+    cross-site attacker cannot forge it, so it still holds when privacy
+    settings make the browser serialize Origin as the literal "null":
+    same-origin and none (typed URL or bookmark) are allowed, cross-site is
+    rejected even if Origin happens to match. Anything else (same-site,
+    unknown, or absent: curl, the overlay's direct JSON POST) keeps the
+    legacy rule: no Origin header means allowed, otherwise the lowercased
+    Origin netloc must match BGBOX_ORIGINS when that list is non-empty, else
+    the request Host. A literal Origin: null (empty netloc) stays rejected.
+    """
+    site = (request.headers.get("sec-fetch-site") or "").strip().lower()
     origin = request.headers.get("origin")
-    if not origin:                    # non-browser clients (curl, tests)
-        return True
-    host = urllib.parse.urlsplit(origin).netloc.lower()
-    if _ALLOWED_ORIGINS:
-        return host in _ALLOWED_ORIGINS
-    return bool(host) and host == (request.headers.get("host") or "").lower()
+    if site in ("same-origin", "none"):
+        ok = True
+    elif site == "cross-site":
+        ok = False
+    elif not origin:                  # non-browser clients (curl, tests)
+        ok = True
+    else:
+        host = urllib.parse.urlsplit(origin).netloc.lower()
+        if _ALLOWED_ORIGINS:
+            ok = bool(host) and host in _ALLOWED_ORIGINS
+        else:
+            ok = bool(host) and host == (request.headers.get("host") or "").lower()
+    if not ok:
+        logger.warning(
+            "cross-origin request rejected: %s %s origin=%r sec-fetch-site=%r "
+            "host=%r", request.method, request.url.path, origin or "",
+            request.headers.get("sec-fetch-site") or "",
+            request.headers.get("host") or "")
+    return ok
 
 
 @app.middleware("http")
