@@ -8,8 +8,8 @@
 <body>
 <form method="post" action="/login">
   <h2 style="margin-top:0">Bugbox admin</h2>
-  {bad}
-  {note}
+  {{ bad|safe }}
+  {{ note|safe }}
   <label>User</label>
   <input name="user" autocomplete="username">
   <label>Password</label>
@@ -17,7 +17,7 @@
   <button>Sign in</button>
 </form>
 <div class="wrap" style="width:300px;margin:0 auto">
-  {github_block}
+  {{ github_block|safe }}
 </div>
 </body>
 </html>

@@ -268,15 +268,8 @@ def _logout_cookie(resp: Response, request: Request) -> None:
 
 
 def _render(name: str, **ctx) -> HTMLResponse:
-    tpl = (TEMPLATES / name).read_text(encoding="utf-8")
-
-    def _sub(m):
-        key = m.group(1)
-        return str(ctx.get(key, m.group(0)))
-
-    # Only swap {word} placeholders; CSS braces ({ }) are left untouched.
-    html_out = re.sub(r"\{(\w+)\}", _sub, tpl)
-    return HTMLResponse(html_out)
+    """Render a template through Jinja2 (autoescaped, cached)."""
+    return HTMLResponse(JINJA.get_template(name).render(**ctx))
 
 
 def _github_redirect_uri(request: Request) -> str:

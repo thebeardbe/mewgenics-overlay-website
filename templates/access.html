@@ -17,8 +17,8 @@
 <body>
 <main>
   <h1 style="margin-top:0">🐞 Bugbox</h1>
-  <p>{message}</p>
-  <span class="pill">status: {status}</span>
+  <p>{{ message|safe }}</p>
+  <span class="pill">status: {{ status }}</span>
   <p style="margin-top:22px"><a href="/login">Back to login</a></p>
 </main>
 </body>

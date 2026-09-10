@@ -21,7 +21,7 @@
       <a href="#" data-s="wontfix">🚫 Won't fix <span class="cnt" id="cnt-wontfix"></span></a>
       <a href="#" data-s="duplicate">🔁 Duplicates <span class="cnt" id="cnt-duplicate"></span></a>
     </nav>
-    {people_link}
+    {{ people_link|safe }}
     <div class="spacer"></div>
     <div class="group">Account</div>
     <a href="/report" class="out">📝 Public report page</a>
