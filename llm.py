@@ -36,8 +36,8 @@ BASE_URL = os.environ.get("LLM_BASE_URL", "https://api.openai.com/v1").rstrip("/
 
 def _llm_url_ok(url: str) -> bool:
     """LLM_BASE_URL is operator-only config; refuse schemes other than
-    https (or a localhost http for self-hosted Ollama) to avoid turning
-    this into an SSRF primitive later."""
+    https, or http://localhost / http://127.* for a self-hosted Ollama, to
+    avoid turning this into an SSRF primitive later."""
     return url.startswith("https://") or url.startswith(
         "http://localhost") or url.startswith("http://127.")
 API_KEY = os.environ.get("LLM_API_KEY", "")

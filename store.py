@@ -756,6 +756,7 @@ def delete_user(user_id: int) -> None:
 
 
 def list_users() -> list[dict]:
+    """All users WITHOUT password_hash (public column list only)."""
     with _lock, _connect() as conn:
         rows = conn.execute(
             "SELECT " + _COLS_USR + " FROM users ORDER BY role = 'owner' DESC, status, "

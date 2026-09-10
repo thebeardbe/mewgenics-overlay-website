@@ -34,6 +34,7 @@ from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader, select_autoescape
+from api_utils import api_response as _api
 
 import admin_api
 import auth
@@ -313,14 +314,6 @@ def _logout_cookie(resp: Response, request: Request) -> None:
     if token:
         store.delete_session(token)
     resp.delete_cookie("bugbox_admin")
-
-
-def _api(payload, code: int = 200):
-    """JSON API response with a consistent error envelope:
-    {"error": {"code": "400", "message": "..."}}."""
-    if isinstance(payload, dict) and isinstance(payload.get("error"), str):
-        payload = {"error": {"code": str(code), "message": payload["error"]}}
-    return JSONResponse(payload, status_code=code)
 
 
 def _render(name: str, **ctx) -> HTMLResponse:

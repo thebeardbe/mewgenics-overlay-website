@@ -10,11 +10,12 @@ const _bugboxFetch = window.fetch.bind(window);
 window.fetch = function (url, opts) {
   opts = opts || {};
   const method = (opts.method || "GET").toUpperCase();
+  opts.headers = Object.assign({}, opts.headers || {},
+                               { "Accept": "application/json" });
   if (method !== "GET" && method !== "HEAD") {
     const tok = csrfToken();
     if (tok) {
-      opts.headers = Object.assign({}, opts.headers || {},
-                                    { "X-Bugbox-CSRF": tok });
+      opts.headers["X-Bugbox-CSRF"] = tok;
     }
   }
   return _bugboxFetch(url, opts);

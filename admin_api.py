@@ -1,5 +1,10 @@
 """Owner-only people management (extracted from app.py).
 
+Deliberately does NOT import app.py (that would be circular). Shared
+response helpers live in api_utils.py; use those if this module ever
+needs to return wrapped JSON directly.
+
+
 Pure logic: the route layer does authentication/owner checks, these
 functions do validation and return ``(payload, status_code)``.
 """

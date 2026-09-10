@@ -727,3 +727,33 @@ def test_admin_writes_are_rate_limited_per_ticket():
     other = store.add({"title": "other"})
     assert logged.post(f"/api/tickets/{other}/status",
                        data={"status": "open"}, headers=ADMIN).status_code == 200
+
+
+def test_public_pages_carry_csp_baseline():
+    for path in ("/", "/report"):
+        r = client.get(path)
+        assert r.status_code == 200
+        csp = r.headers.get("content-security-policy", "")
+        assert "default-src 'self'" in csp
+        # landing/report may use inline styles, but no inline-only gap remains
+        assert "'unsafe-inline'" in csp
+
+
+def test_api_error_envelope_shape():
+    """Errors use {error:{code,message}}; successes keep their own shape."""
+    r = client.get("/api/tickets", headers=ADMIN)
+    assert r.status_code == 401
+    body = r.json()
+    assert isinstance(body["error"], dict)
+    assert body["error"]["code"] == "401"
+    assert isinstance(body["error"]["message"], str)
+    logged = _login_client()
+    ok = logged.get("/api/tickets", headers=ADMIN)
+    assert ok.status_code == 200
+    assert "error" not in ok.json()
+
+
+def test_list_users_never_loads_password_hash():
+    assert "password_hash" not in store._COLS_USR
+    for u in store.list_users():
+        assert "password_hash" not in u
