@@ -49,7 +49,7 @@ def _fresh_db():
     # cache (no background GitHub fetches during tests) + a seeded owner.
     for f in os.listdir(_DATA):
         os.unlink(os.path.join(_DATA, f))
-    bugbox_app._buckets.clear()
+    bugbox_app.RATE.reset()
     bugbox_app._version_cache.update(version="0.1.46", ts=float("inf"))
     store.init()
     store.ensure_owner(bugbox_app.ADMIN_USER, bugbox_app.ADMIN_PASS)
@@ -145,7 +145,7 @@ def test_rate_limit_reporting():
 
 
 def test_throttle_helper():
-    bugbox_app._buckets.clear()
+    bugbox_app.RATE.reset()
     for i in range(5):
         assert bugbox_app._throttled("t:1", 5, 60) is False
     assert bugbox_app._throttled("t:1", 5, 60) is True

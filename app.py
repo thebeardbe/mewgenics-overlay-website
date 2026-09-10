@@ -86,19 +86,55 @@ REPORT_RATE_LIMIT = (10, 60)      # (max, window seconds) per IP
 LOGIN_RATE_LIMIT = (5, 60)
 
 # In-memory per-IP rate buckets (restart resets them; fine for self-hosting).
-_buckets: dict = {}
-_bucket_lock = threading.Lock()
-_BUCKET_TTL = 600.0          # rate buckets older than this get swept
+class RateLimiter:
+    """Per-key sliding-window limiter with TTL pruning and a public reset.
+
+    Owning the state in an object (instead of module globals) gives tests a
+    supported `reset()` instead of reaching into private dicts.
+    """
+
+    def __init__(self, ttl: float = 600.0) -> None:
+        self._buckets: dict = {}
+        self._lock = threading.Lock()
+        self.ttl = ttl
+
+    def allow(self, key: str, limit: int, window: float) -> bool:
+        """True when *key* has exceeded *limit* hits in *window* seconds."""
+        if len(self._buckets) > 2000:
+            self.prune()
+        now = time.monotonic()
+        with self._lock:
+            bucket = self._buckets.get(key)
+            if bucket is None or now - bucket[0] > window:
+                self._buckets[key] = [now, 1]
+                return False
+            bucket[1] += 1
+            return bucket[1] > limit
+
+    def prune(self, now=None) -> int:
+        """Drop stale buckets (unbounded-memory guard). Returns count."""
+        now = time.monotonic() if now is None else now
+        with self._lock:
+            stale = [k for k, (ts, _v) in self._buckets.items()
+                     if now - ts > self.ttl]
+            for k in stale:
+                del self._buckets[k]
+            return len(stale)
+
+    def reset(self) -> None:
+        with self._lock:
+            self._buckets.clear()
+
+
+RATE = RateLimiter()
+
+
+def _throttled(key: str, limit: int, window: float) -> bool:
+    return RATE.allow(key, limit, window)
 
 
 def _prune_buckets(now=None) -> int:
-    """Drop rate-limit buckets that have gone stale (unbounded memory guard)."""
-    now = time.monotonic() if now is None else now
-    with _bucket_lock:
-        stale = [k for k, (ts, _v) in _buckets.items() if now - ts > _BUCKET_TTL]
-        for k in stale:
-            del _buckets[k]
-        return len(stale)
+    return RATE.prune(now)
 
 
 def _maintenance_loop() -> None:
@@ -235,19 +271,6 @@ def _client_ip(request: Request) -> str:
         return fwd.split(",")[0].strip()
     return request.client.host if request.client else "?"
 
-
-def _throttled(key: str, limit: int, window: float) -> bool:
-    """True when *key* has exceeded *limit* hits in *window* seconds."""
-    if len(_buckets) > 2000:
-        _prune_buckets()
-    now = time.monotonic()
-    with _bucket_lock:
-        bucket = _buckets.get(key)
-        if bucket is None or now - bucket[0] > window:
-            _buckets[key] = [now, 1]
-            return False
-        bucket[1] += 1
-        return bucket[1] > limit
 
 
 # ── auth ──────────────────────────────────────────────────────────────────
