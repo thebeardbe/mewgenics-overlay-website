@@ -714,3 +714,16 @@ def test_concurrent_github_user_creation_is_idempotent():
     ids = {u["id"] for u in out}
     assert len(ids) == 1                      # one user, no duplicates
     assert store.user_by_github("313131", "racedev") is not None
+
+
+def test_admin_writes_are_rate_limited_per_ticket():
+    logged = _login_client()
+    rid = store.add({"title": "flood me"})
+    codes = [logged.post(f"/api/tickets/{rid}/status",
+                         data={"status": "open"}, headers=ADMIN).status_code
+             for _ in range(35)]
+    assert 429 in codes
+    # a different ticket is unaffected
+    other = store.add({"title": "other"})
+    assert logged.post(f"/api/tickets/{other}/status",
+                       data={"status": "open"}, headers=ADMIN).status_code == 200

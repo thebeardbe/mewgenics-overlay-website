@@ -85,6 +85,7 @@ GITHUB_ENABLED = bool(GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET)
 MAX_BODY_BYTES = 400_000          # reject anything larger up front (nginx too)
 REPORT_RATE_LIMIT = (10, 60)      # (max, window seconds) per IP
 LOGIN_RATE_LIMIT = (5, 60)
+ADMIN_WRITE_RATE_LIMIT = (30, 60)   # per user per ticket
 
 # In-memory per-IP rate buckets (restart resets them; fine for self-hosting).
 class RateLimiter:
@@ -136,6 +137,12 @@ def _throttled(key: str, limit: int, window: float) -> bool:
 
 def _prune_buckets(now=None) -> int:
     return RATE.prune(now)
+
+
+def _admin_throttled(user: dict, rid: str) -> bool:
+    """Per-user, per-ticket write throttle for admin mutations."""
+    key = f"admin:{user.get('id')}:{rid}"
+    return RATE.allow(key, *ADMIN_WRITE_RATE_LIMIT)
 
 
 def _maintenance_loop() -> None:
@@ -619,14 +626,19 @@ def api_status(request: Request, rid: str, status: str = Form("")):
     user = _current_user(request)
     if user is None:
         return _api({"error": "unauthorized"}, 401)
+    if _admin_throttled(user, rid):
+        return _api({"error": "too many actions on this ticket, slow down"}, 429)
     payload, code = admin_api.set_status(user, rid, status)
     return _api(payload, code)
 
 
 @app.post("/api/tickets/{rid}/delete")
 def api_delete(request: Request, rid: str):
-    if _current_user(request) is None:
+    user = _current_user(request)
+    if user is None:
         return _api({"error": "unauthorized"}, 401)
+    if _admin_throttled(user, rid):
+        return _api({"error": "too many actions on this ticket, slow down"}, 429)
     payload, code = admin_api.delete_ticket(rid)
     return _api(payload, code)
 
@@ -637,6 +649,8 @@ def api_tags(request: Request, rid: str,
     user = _current_user(request)
     if user is None:
         return _api({"error": "unauthorized"}, 401)
+    if _admin_throttled(user, rid):
+        return _api({"error": "too many actions on this ticket, slow down"}, 429)
     payload, code = admin_api.set_tags(user, rid, severity, category)
     return _api(payload, code)
 
@@ -646,6 +660,8 @@ def api_comment_add(request: Request, rid: str, body: str = Form("")):
     user = _current_user(request)
     if user is None:
         return _api({"error": "unauthorized"}, 401)
+    if _admin_throttled(user, rid):
+        return _api({"error": "too many actions on this ticket, slow down"}, 429)
     payload, code = admin_api.add_comment(user, rid, body)
     return _api(payload, code)
 
@@ -655,6 +671,8 @@ def api_comment_delete(request: Request, rid: str, index: int = Form(0)):
     user = _current_user(request)
     if user is None:
         return _api({"error": "unauthorized"}, 401)
+    if _admin_throttled(user, rid):
+        return _api({"error": "too many actions on this ticket, slow down"}, 429)
     payload, code = admin_api.delete_comment(user, rid, index)
     return _api(payload, code)
 
@@ -664,6 +682,8 @@ def api_ticket_link(request: Request, rid: str, target: str = Form("")):
     user = _current_user(request)
     if user is None:
         return _api({"error": "unauthorized"}, 401)
+    if _admin_throttled(user, rid):
+        return _api({"error": "too many actions on this ticket, slow down"}, 429)
     payload, code = admin_api.link_tickets(user, rid, target)
     return _api(payload, code)
 
