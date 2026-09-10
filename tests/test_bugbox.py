@@ -697,3 +697,20 @@ def test_ticket_list_is_paginated():
     ids1 = {t["id"] for t in page1["tickets"]}
     ids2 = {t["id"] for t in page2["tickets"]}
     assert not (ids1 & ids2)
+
+
+def test_concurrent_github_user_creation_is_idempotent():
+    import threading
+    out = []
+
+    def worker():
+        out.append(store.create_github_user("313131", "RaceyDev"))
+
+    threads = [threading.Thread(target=worker) for _ in range(6)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    ids = {u["id"] for u in out}
+    assert len(ids) == 1                      # one user, no duplicates
+    assert store.user_by_github("313131", "racedev") is not None
