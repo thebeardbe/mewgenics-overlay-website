@@ -562,7 +562,7 @@ def test_list_is_lite_and_detail_has_heavy_columns():
     assert store.exists("nope") is False
     # the detail endpoint serves the heavy payload; the list endpoint never does
     logged = _login_client()
-    lr = logged.get("/api/tickets", headers=ADMIN).json()
+    lr = logged.get("/api/tickets", headers=ADMIN).json()["tickets"]
     row = [r for r in lr if r["id"] == rid][0]
     assert "body" not in row and "log" not in row
     dr = logged.get(f"/api/tickets/{rid}", headers=ADMIN)
@@ -684,3 +684,16 @@ def test_github_logins_are_case_insensitive():
     adopted = store.create_github_user("424242", "MixedCaseDev")
     assert adopted["github_login"] == "mixedcasedev"
     assert adopted["status"] == "approved"
+
+
+def test_ticket_list_is_paginated():
+    for i in range(3):
+        store.add({"title": f"page {i}"})
+    logged = _login_client()
+    page1 = logged.get("/api/tickets?limit=2&offset=0", headers=ADMIN).json()
+    assert page1["total"] >= 3 and len(page1["tickets"]) == 2
+    page2 = logged.get("/api/tickets?limit=2&offset=2", headers=ADMIN).json()
+    assert page2["offset"] == 2 and len(page2["tickets"]) >= 1
+    ids1 = {t["id"] for t in page1["tickets"]}
+    ids2 = {t["id"] for t in page2["tickets"]}
+    assert not (ids1 & ids2)

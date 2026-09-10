@@ -601,10 +601,15 @@ def people_page(request: Request):
 
 
 @app.get("/api/tickets")
-def api_tickets(request: Request, status: str | None = None):
+def api_tickets(request: Request, status: str | None = None,
+                limit: int = 50, offset: int = 0):
     if _current_user(request) is None:
         return JSONResponse({"error": "unauthorized"}, status_code=401)
-    return store.list_reports(status)
+    limit = max(1, min(int(limit), 200))
+    offset = max(0, int(offset))
+    tickets = store.list_reports(status, limit=limit, offset=offset)
+    return {"tickets": tickets, "total": store.count_reports(status),
+            "limit": limit, "offset": offset}
 
 
 @app.get("/api/tickets/{rid}")

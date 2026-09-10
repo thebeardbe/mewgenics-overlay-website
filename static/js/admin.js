@@ -36,10 +36,17 @@ function actRow(ev, rid) {
   </div>`;
 }
 
-async function load() {
-  const r = await fetch("/api/tickets");
+let ticketTotal = 0;
+
+async function load(more) {
+  const offset = more ? tickets.length : 0;
+  const q = (current ? "status=" + encodeURIComponent(current) + "&" : "")
+          + "limit=200&offset=" + offset;
+  const r = await fetch("/api/tickets?" + q);
   if (r.status === 401) { location.href = "/login"; return; }
-  tickets = await r.json();
+  const data = await r.json();
+  ticketTotal = data.total;
+  tickets = more ? tickets.concat(data.tickets) : data.tickets;
   const counts = { "": tickets.length };
   tickets.forEach(t => counts[t.status] = (counts[t.status] || 0) + 1);
   document.querySelectorAll("aside a[data-s]").forEach(a => {
@@ -63,12 +70,22 @@ function visible() {
 function render() {
   const rows = visible();
   document.getElementById("heading").textContent =
-    (current ? current : "all") + " · " + rows.length + " report(s)";
+    (current ? current : "all") + " · " + rows.length
+    + " of " + ticketTotal + " report(s)";
   if (!rows.length) {
     el.innerHTML = '<div class="empty">No reports here 🐱</div>';
     return;
   }
   el.innerHTML = rows.map(card).join("");
+  if (tickets.length < ticketTotal) {
+    const more = document.createElement("button");
+    more.className = "toggle";
+    more.style.display = "block";
+    more.style.margin = "10px auto";
+    more.textContent = "Load older tickets…";
+    more.onclick = () => load(true);
+    el.appendChild(more);
+  }
 }
 
 function card(t) {

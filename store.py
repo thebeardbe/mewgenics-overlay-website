@@ -380,17 +380,28 @@ def _backfill_activity_tables(conn) -> None:
                     "VALUES (?, ?)", (rid, other))
 
 
-def list_reports(status: str | None = None, limit: int = 200) -> list[dict]:
+def list_reports(status: str | None = None, limit: int = 50,
+                 offset: int = 0) -> list[dict]:
     q = "SELECT " + _COLS_RPT_LITE + " FROM reports"
     args: list = []
     if status:
         q += " WHERE status = ?"
         args.append(status)
-    q += " ORDER BY created DESC LIMIT ?"
-    args.append(limit)
+    q += " ORDER BY created DESC LIMIT ? OFFSET ?"
+    args.extend([max(1, min(int(limit), 200)), max(0, int(offset))])
     with _lock, _connect() as conn:
         rows = conn.execute(q, args).fetchall()
     return _parse_reports(rows)
+
+
+def count_reports(status: str | None = None) -> int:
+    q = "SELECT COUNT(*) FROM reports"
+    args: list = []
+    if status:
+        q += " WHERE status = ?"
+        args.append(status)
+    with _lock, _connect() as conn:
+        return int(conn.execute(q, args).fetchone()[0])
 
 
 def exists(rid: str) -> bool:
