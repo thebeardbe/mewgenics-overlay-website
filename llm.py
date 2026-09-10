@@ -33,6 +33,13 @@ import unicodedata
 import urllib.request
 
 BASE_URL = os.environ.get("LLM_BASE_URL", "https://api.openai.com/v1").rstrip("/")
+
+def _llm_url_ok(url: str) -> bool:
+    """LLM_BASE_URL is operator-only config; refuse schemes other than
+    https (or a localhost http for self-hosted Ollama) to avoid turning
+    this into an SSRF primitive later."""
+    return url.startswith("https://") or url.startswith(
+        "http://localhost") or url.startswith("http://127.")
 API_KEY = os.environ.get("LLM_API_KEY", "")
 MODEL = os.environ.get("LLM_MODEL", "gpt-4o-mini")
 
@@ -171,6 +178,10 @@ def analyze(report: dict, recent: list[dict]) -> dict:
             {"role": "user", "content": user},
         ],
     }
+    if not _llm_url_ok(BASE_URL):
+        return {"error": "LLM_BASE_URL must be https (or a localhost http)",
+
+                "summary": "not analysed - endpoint config rejected"}
     headers = {"Content-Type": "application/json"}
     if API_KEY:
         headers["Authorization"] = f"Bearer {API_KEY}"

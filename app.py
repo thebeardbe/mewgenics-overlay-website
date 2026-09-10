@@ -23,6 +23,8 @@ import logging
 import os
 import re
 import secrets
+import socket
+socket.setdefaulttimeout(15)   # DNS hangs cannot stall threads
 import threading
 import time
 import urllib.parse
@@ -305,6 +307,7 @@ _version_refreshing = False
 
 def _fetch_github_version() -> str:
     """Fetch the newest overlay release tag (e.g. '0.1.46'); best-effort."""
+    logger.debug("refreshing overlay version from GitHub")
     try:
         req = urllib.request.Request(
             _VERSION_URL,
@@ -315,9 +318,10 @@ def _fetch_github_version() -> str:
             data = json.loads(resp.read().decode("utf-8"))
         tag = str(data.get("tag_name") or "").lstrip("v")
         if re.fullmatch(r"\d+\.\d+\.\d+", tag):
+            logger.debug("overlay version refreshed: %s", tag)
             return tag
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("overlay version refresh failed: %s", exc)
     return _version_cache["version"]
 
 
