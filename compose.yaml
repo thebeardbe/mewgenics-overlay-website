@@ -18,6 +18,8 @@ services:
       BGBOX_ADMIN_NAME: "${BGBOX_ADMIN_NAME:-}"  # owner display name (also on /admin/people)
       BGBOX_ORIGINS: "${BGBOX_ORIGINS:-}"        # allowed POST origins for the CSRF origin gate
       BGBOX_LOG_FILE: "${BGBOX_LOG_FILE:-}"      # rotating log file path (secrets scrubbed)
+      BGBOX_ANALYTICS_SCRIPT: "${BGBOX_ANALYTICS_SCRIPT:-}"  # Umami script URL (off when empty)
+      BGBOX_ANALYTICS_ID: "${BGBOX_ANALYTICS_ID:-}"          # Umami website id (off when empty)
       # Optional GitHub developer sign-in (see README / .env.example).
       GITHUB_CLIENT_ID: "${GITHUB_CLIENT_ID:-}"
       GITHUB_CLIENT_SECRET: "${GITHUB_CLIENT_SECRET:-}"

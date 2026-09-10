@@ -1,4 +1,7 @@
 {% extends "base_public.html" %}
+{# An error response is never a real public page, so it carries neither the
+   analytics tag nor the footer disclosure that goes with it. #}
+{% set analytics_page = false %}
 {% block title %}Error {{ code }}{% endblock %}
 {% block content %}
 <div class="card center">

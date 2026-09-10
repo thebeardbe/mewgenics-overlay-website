@@ -1,0 +1,7 @@
+{# The analytics tag and its footer disclosure are one decision, so both
+   macros read the same condition here. Error pages set analytics_page to
+   false, which makes both render nothing. #}
+{% macro analytics_head() %}{% if analytics_page|default(true) and analytics_script %}<script defer src="{{ analytics_script }}" data-website-id="{{ analytics_id }}"></script>
+{% endif %}{% endmacro %}
+{% macro analytics_footer() %}{% if analytics_page|default(true) and analytics_script %}  <p>Page views are counted anonymously and without cookies.</p>
+{% endif %}{% endmacro %}

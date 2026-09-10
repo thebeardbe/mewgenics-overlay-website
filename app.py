@@ -56,6 +56,23 @@ JINJA = Environment(
 STATIC_DIR = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR), check_dir=False),
           name="static")
+FAVICON = STATIC_DIR / "favicon.ico"
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon(request: Request) -> Response:
+    """Serve the tab icon from the root path browsers ask for unprompted.
+
+    Without this route every page load fell through to the 404 handler and
+    paid for a full error-page render.
+    """
+    try:
+        data = FAVICON.read_bytes()
+    except OSError as exc:
+        logger.warning("favicon.ico unreadable at %s: %s", FAVICON, exc)
+        return _error_response(request, 404)
+    return Response(content=data, media_type="image/x-icon",
+                    headers={"Cache-Control": "public, max-age=86400"})
 
 # ── transport / deployment expectations ─────────────────────────────────────
 # BGBOX_HTTPS=1 when the reverse proxy terminates TLS: enables HSTS and is
@@ -84,6 +101,49 @@ GITHUB_CLIENT_ID = os.environ.get("GITHUB_CLIENT_ID", "")
 GITHUB_CLIENT_SECRET = os.environ.get("GITHUB_CLIENT_SECRET", "")
 GITHUB_REDIRECT_URI = os.environ.get("GITHUB_REDIRECT_URI", "")
 GITHUB_ENABLED = bool(GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET)
+
+# Optional self-hosted Umami page analytics. Pages that render the tag carry
+# the script only when both values are set and the script URL is an https URL
+# with a host and no credentials; any partial or malformed configuration logs
+# one warning and stays off.
+ANALYTICS_SCRIPT = os.environ.get("BGBOX_ANALYTICS_SCRIPT", "").strip()
+ANALYTICS_ID = os.environ.get("BGBOX_ANALYTICS_ID", "").strip()
+ANALYTICS_ORIGIN = ""
+if ANALYTICS_SCRIPT and ANALYTICS_ID:
+    _analytics_url = urllib.parse.urlsplit(ANALYTICS_SCRIPT)
+    _analytics_host = _analytics_url.hostname or ""
+    # A userinfo part (https://user:pass@host/x.js) passes a bare hostname
+    # check but is not a valid policy host, so browsers refuse the script; a
+    # malformed port raises, and an empty host is no host at all.
+    _analytics_ok = bool(
+        _analytics_url.scheme == "https" and _analytics_host
+        and _analytics_url.username is None
+        and _analytics_url.password is None)
+    try:
+        _analytics_port = _analytics_url.port if _analytics_ok else None
+    except ValueError:
+        _analytics_ok = False
+        _analytics_port = None
+    if _analytics_ok:
+        # Built from the host and its port alone, so the origin can only ever
+        # be https://host or https://host:port.
+        _analytics_netloc = (f"[{_analytics_host}]" if ":" in _analytics_host
+                             else _analytics_host)
+        _analytics_suffix = f":{_analytics_port}" if _analytics_port else ""
+        ANALYTICS_ORIGIN = f"https://{_analytics_netloc}{_analytics_suffix}"
+    else:
+        logger.warning(
+            "BGBOX_ANALYTICS_SCRIPT must be an https URL with a host and no "
+            "credentials, got %r; page analytics disabled", ANALYTICS_SCRIPT)
+elif ANALYTICS_SCRIPT or ANALYTICS_ID:
+    logger.warning(
+        "page analytics needs both BGBOX_ANALYTICS_SCRIPT and "
+        "BGBOX_ANALYTICS_ID, only %s is set; page analytics disabled",
+        "BGBOX_ANALYTICS_SCRIPT" if ANALYTICS_SCRIPT else "BGBOX_ANALYTICS_ID")
+# Exposed as Jinja globals instead of threading them through every route.
+# Both are empty strings when analytics is off, so the templates stay silent.
+JINJA.globals["analytics_script"] = ANALYTICS_SCRIPT if ANALYTICS_ORIGIN else ""
+JINJA.globals["analytics_id"] = ANALYTICS_ID if ANALYTICS_ORIGIN else ""
 
 MAX_BODY_BYTES = 400_000          # reject anything larger up front (nginx too)
 REPORT_RATE_LIMIT = (10, 60)      # (max, window seconds) per IP
@@ -213,22 +273,49 @@ if LOG_FILE:
 
 
 # ── content-security policies ──────────────────────────────────────────────
+def _csp(*, inline: bool, analytics: bool) -> str:
+    """One builder for every policy, so no directive list is written twice.
+
+    *inline* allows the inline <style> that the standalone public pages and
+    the error page carry. *analytics* adds the configured Umami origin, which
+    its script is fetched from and beacons to, so it belongs in script-src and
+    connect-src together; only a page that renders the tag is ever built with
+    it, see _csp_for.
+    """
+    extra = f" {ANALYTICS_ORIGIN}" if analytics and ANALYTICS_ORIGIN else ""
+    sources = "'self' 'unsafe-inline'" if inline else "'self'"
+    return ("default-src 'self'; "
+            f"script-src {sources}{extra}; "
+            f"style-src {sources}; img-src 'self' data:; "
+            f"font-src 'self'; connect-src 'self'{extra}; object-src 'none'; "
+            "base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
+
+
 # Auth'd pages ship their CSS/JS from /static (no inline), so they get a
 # strict policy without 'unsafe-inline'. Public marketing/landing pages are
-# still allowed inline styles (they contain no inline scripts).
-_CSP_STRICT = ("default-src 'self'; script-src 'self'; style-src 'self'; "
-               "img-src 'self' data:; font-src 'self'; connect-src 'self'; "
-               "object-src 'none'; base-uri 'none'; frame-ancestors 'none'; "
-               "form-action 'self'")
-_CSP_BASELINE = ("default-src 'self'; script-src 'self' 'unsafe-inline'; "
-                 "style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
-                 "font-src 'self'; connect-src 'self'; object-src 'none'; "
-                 "base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
+# still allowed inline styles (they contain no inline scripts), and only a
+# page that renders the analytics tag may reach the analytics origin.
+_CSP_STRICT = _csp(inline=False, analytics=False)
+_CSP_BASELINE = _csp(inline=True, analytics=False)
+_CSP_PUBLIC = _csp(inline=True, analytics=True)
+
+# The only normal responses that render the analytics tag: the landing page,
+# the report form and the thanks page (the POST /submit response).
+_ANALYTICS_PATHS = frozenset({"/", "/report", "/submit"})
 
 
 def _csp_for(path: str) -> str:
+    """The policy for a normal response on *path* (errors pin the baseline).
+
+    The analytics origin is granted only to the paths in _ANALYTICS_PATHS,
+    the ones that render the tag. Every other non-admin path keeps the
+    baseline policy, which still allows the inline styles the standalone
+    pages carry.
+    """
     if path.startswith(("/admin", "/login", "/api")):
         return _CSP_STRICT
+    if path in _ANALYTICS_PATHS:
+        return _CSP_PUBLIC
     return _CSP_BASELINE
 
 
@@ -391,10 +478,12 @@ def _error_response(request: Request, code: int,
     """Error page for a browser, today's exact response for an API client.
 
     Every error response carries the baseline CSP, not the strict one a
-    normal /admin/ or /login/ response gets: the error page is only static
-    copy plus an integer code, no scripts, no user-supplied content, and its
-    styling is the inline <style> block in base_public.html that the strict
-    policy would drop, which left a mistyped admin URL unstyled.
+    normal /admin/ or /login/ response gets, and not the public one either:
+    the baseline carries no analytics origin, so an error page never
+    authorises a third-party script it does not load. The error page is only
+    static copy plus an integer code, no scripts, no user-supplied content,
+    and its styling is the inline <style> block in base_public.html that the
+    strict policy would drop, which left a mistyped admin URL unstyled.
     """
     resp = error_pages.render_error(request, code, fallback,
                                     render=_render_html, headers=headers)

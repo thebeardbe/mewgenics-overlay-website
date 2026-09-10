@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Cat mark for Bugbox. Flat amber head on a transparent background; the
+     eyes are punched in the page background colour so they stay readable at
+     16px. Amber #e8a33d, eyes #14120f (see templates/base_public.html). -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Cat">
+  <title>Bugbox</title>
+  <path fill="#e8a33d" d="M15 27.46 L13 5 L28 18.4 A20 20 0 0 1 36 18.4 L51 5 L49 27.46 A20 20 0 1 1 15 27.46 Z"/>
+  <circle fill="#14120f" cx="24" cy="37" r="5"/>
+  <circle fill="#14120f" cx="40" cy="37" r="5"/>
+</svg>
