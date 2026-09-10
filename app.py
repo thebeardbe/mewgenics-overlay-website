@@ -35,6 +35,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
+import admin_api
 import auth
 import llm
 import store
@@ -721,9 +722,7 @@ def api_users(request: Request):
     user, err = _require_owner(request)
     if err:
         return err
-    # Never expose password hashes, even to the owner.
-    return [{k: v for k, v in u.items() if k != "password_hash"}
-            for u in store.list_users()]
+    return admin_api.public_users()
 
 
 @app.post("/api/users/github")
@@ -731,10 +730,8 @@ def api_users_github(request: Request, login: str = Form("")):
     user, err = _require_owner(request)
     if err:
         return err
-    created = store.add_github_preapproval(login)
-    if created is None:
-        return JSONResponse({"error": "invalid github login"}, status_code=400)
-    return created
+    payload, status = admin_api.preapprove(login)
+    return JSONResponse(payload, status_code=status)
 
 
 @app.post("/api/users/{uid}/status")
@@ -743,38 +740,20 @@ def api_user_status(request: Request, uid: int,
     user, err = _require_owner(request)
     if err:
         return err
-    if status not in {"approved", "pending", "denied"}:
-        return JSONResponse({"error": "bad status"}, status_code=400)
-    target = _user_or_404(uid)
-    if target is None:
-        return JSONResponse({"error": "not found"}, status_code=404)
-    if target.get("role") == "owner":
-        return JSONResponse({"error": "cannot change the owner"},
-                            status_code=400)
-    store.set_user_status(uid, status)
-    if status != "approved":
-        # Locked-out users must not keep live sessions.
-        store.delete_sessions_for_user(uid)
-    return {"ok": True}
+    payload, code = admin_api.change_status(user, uid, status)
+    return JSONResponse(payload, status_code=code)
 
 
 @app.post("/api/users/{uid}/display-name")
 def api_user_display_name(request: Request, uid: int,
                           name: str = Form("")):
     """Set a user's public display name (owner only). Empty resets to the
-    username. The name is what shows on ticket timelines instead of the
-    login/github handle."""
+    username; the name shows on ticket timelines."""
     user, err = _require_owner(request)
     if err:
         return err
-    target = _user_or_404(uid)
-    if target is None:
-        return JSONResponse({"error": "not found"}, status_code=404)
-    if target.get("role") == "owner" and target.get("id") != user.get("id"):
-        return JSONResponse({"error": "cannot rename the owner"},
-                            status_code=400)
-    updated = store.set_display_name(uid, name)
-    return {"ok": True, "display_name": updated["display_name"]}
+    payload, code = admin_api.rename(user, uid, name)
+    return JSONResponse(payload, status_code=code)
 
 
 @app.post("/api/users/{uid}/delete")
@@ -782,18 +761,6 @@ def api_user_delete(request: Request, uid: int):
     user, err = _require_owner(request)
     if err:
         return err
-    target = _user_or_404(uid)
-    if target is None:
-        return JSONResponse({"error": "not found"}, status_code=404)
-    if target.get("role") == "owner":
-        return JSONResponse({"error": "cannot delete the owner"},
-                            status_code=400)
-    store.delete_user(uid)
-    return {"ok": True}
+    payload, code = admin_api.remove(uid)
+    return JSONResponse(payload, status_code=code)
 
-
-def _user_or_404(uid: int) -> dict | None:
-    for u in store.list_users():
-        if u["id"] == uid:
-            return u
-    return None
