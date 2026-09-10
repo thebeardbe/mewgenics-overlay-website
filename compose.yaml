@@ -3,12 +3,21 @@ services:
     build: .
     container_name: bugbox
     restart: unless-stopped
+    # Shared bridge with Nginx Proxy Manager and the other proxied sites, so
+    # the proxy reaches this container by name at http://bugbox:8000.
+    networks:
+      - proxy-network
     environment:
       # Admin login
       BGBOX_ADMIN_USER: admin
       BGBOX_ADMIN_PASS: "${BGBOX_ADMIN_PASS:?set in .env}"
       BGBOX_COOKIE_KEY: "${BGBOX_COOKIE_KEY:?set in .env}"
       BGBOX_COOKIE_SECURE: "${BGBOX_COOKIE_SECURE:-0}"
+      # Deployment options documented in .env.example.
+      BGBOX_HTTPS: "${BGBOX_HTTPS:-}"            # HSTS when the proxy terminates TLS
+      BGBOX_ADMIN_NAME: "${BGBOX_ADMIN_NAME:-}"  # owner display name (also on /admin/people)
+      BGBOX_ORIGINS: "${BGBOX_ORIGINS:-}"        # allowed POST origins for the CSRF origin gate
+      BGBOX_LOG_FILE: "${BGBOX_LOG_FILE:-}"      # rotating log file path (secrets scrubbed)
       # Optional GitHub developer sign-in (see README / .env.example).
       GITHUB_CLIENT_ID: "${GITHUB_CLIENT_ID:-}"
       GITHUB_CLIENT_SECRET: "${GITHUB_CLIENT_SECRET:-}"
@@ -22,7 +31,15 @@ services:
     volumes:
       - bugbox-data:/data
     ports:
-      - "127.0.0.1:8200:8000"   # exposed only via your reverse proxy
+      - "127.0.0.1:8200:8000"   # loopback only, for host-side smoke tests
+
+networks:
+  # Must already exist, one time per host:
+  #   docker network create proxy-network
+  # Declared external so Compose never creates or removes it: other sites
+  # behind the same proxy would lose their route to it.
+  proxy-network:
+    external: true
 
 volumes:
   bugbox-data:

@@ -18,15 +18,53 @@ Players reach it two ways:
 
 ## Deploy on your Ubuntu + Docker + Nginx Proxy Manager
 
+Two prerequisites must hold before the first `docker compose up`. Both are
+already satisfied on a host where other sites are running behind Nginx Proxy
+Manager and that proxy's network is itself named `proxy-network`, so only
+such a host can skip straight to the deploy step. A proxy bridge under any
+other name still needs the steps below, starting with the network name.
+
+1. **The shared network exists.** Create it only when it is missing, so a
+   genuine failure (the Docker daemon being down, a permission problem) still
+   surfaces:
+
+   ```bash
+   docker network inspect proxy-network >/dev/null 2>&1 \
+     || docker network create proxy-network
+   ```
+
+2. **The reverse proxy container is attached to that network.** Otherwise the
+   proxy cannot resolve the container by name and the proxy host fails. Attach
+   the Nginx Proxy Manager container to that network:
+
+   ```bash
+   docker network connect proxy-network <npm-container-name>
+   ```
+
+   This attach does not persist. Recreating the Nginx Proxy Manager container
+   (a `--force-recreate`, or a `down` and `up` on its own stack) drops it, and
+   the name `bugbox` then stops resolving for the proxy, so the proxy host
+   fails with no obvious cause. Repeat the command after any such recreation,
+   or declare `proxy-network` as `external` in Nginx Proxy Manager's own
+   compose file so its container rejoins the network on every start.
+
+Then deploy:
+
 ```bash
 cd bugbox
 cp .env.example .env        # set BGBOX_ADMIN_PASS, BGBOX_COOKIE_KEY,
                             # LLM_API_KEY (or leave empty to disable analysis)
-                            # and BGBOX_COOKIE_SECURE=1 if served over https
+                            # and BGBOX_COOKIE_SECURE=1 plus BGBOX_HTTPS=1
+                            # (HSTS) if served over https
 docker compose up -d --build
 ```
 
-The container listens on `127.0.0.1:8200` only — never expose it directly.
+The container is reached two ways, neither of which needs a public port:
+
+- **Over the shared Docker network** as `http://bugbox:8000`. This is how the
+  reverse proxy should reach it.
+- **On the host loopback** as `http://127.0.0.1:8200`, handy for a `curl`
+  smoke test and for a proxy that runs directly on the host.
 
 **Admin access (multi-user):** the login page always offers the local owner
 account (`BGBOX_ADMIN_USER` / `BGBOX_ADMIN_PASS`). To add developers, create a
@@ -52,9 +90,12 @@ In **Nginx Proxy Manager** create a Proxy Host:
 | field | value |
 |---|---|
 | Domain Names | `bugs.yourdomain.com` |
-| Scheme / Forward Hostname / Port | `http` · `127.0.0.1` · `8200` |
+| Scheme / Forward Hostname / Port | `http` · `bugbox` · `8000` |
 | Websockets Support | on (optional) |
 | SSL | request a Let's Encrypt cert (on) |
+
+If your proxy runs directly on the host instead of in a container, forward to
+`127.0.0.1` port `8200` instead.
 
 ## LLM provider
 
