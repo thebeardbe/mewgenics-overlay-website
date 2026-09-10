@@ -62,3 +62,75 @@ def remove(uid: int):
         return {"error": "cannot delete the owner"}, 400
     store.delete_user(uid)
     return {"ok": True}, 200
+
+
+# ── ticket mutations (owner/developer admins) ──────────────────────────────
+_TICKET_STATUSES = {"open", "triaged", "fixed", "wontfix", "duplicate"}
+
+
+def _actor_fields(user: dict):
+    return {
+        "actor": user.get("username") or user.get("github_login") or "admin",
+        "role": user.get("role") or "",
+        "actor_id": user.get("id"),
+    }
+
+
+def set_status(user: dict, rid: str, status: str):
+    if status not in _TICKET_STATUSES:
+        return {"error": "bad status"}, 400
+    if not store.exists(rid):
+        return {"error": "not found"}, 404
+    store.update_status(rid, status, **_actor_fields(user))
+    return {"ok": True}, 200
+
+
+def delete_ticket(rid: str):
+    if not store.exists(rid):
+        return {"error": "not found"}, 404
+    store.delete_report(rid)
+    return {"ok": True}, 200
+
+
+def set_tags(user: dict, rid: str, severity: str, category: str):
+    import llm
+    sev = (severity or "").strip().lower()
+    cat = (category or "").strip().lower()
+    if sev and sev not in llm._SEVERITIES:
+        return {"error": f"bad severity: {sev}"}, 400
+    if cat and cat not in llm._CATEGORIES:
+        return {"error": f"bad category: {cat}"}, 400
+    if not store.exists(rid):
+        return {"error": "not found"}, 404
+    store.set_tags(rid, sev or None, cat or None, **_actor_fields(user))
+    return {"ok": True}, 200
+
+
+def add_comment(user: dict, rid: str, body: str):
+    body = (body or "").strip()
+    if not body:
+        return {"error": "empty comment"}, 400
+    entry = store.add_comment(
+        rid,
+        user.get("username") or user.get("github_login") or "admin",
+        user.get("role") or "admin",
+        body,
+        actor_id=user.get("id"))
+    if entry is None:
+        return {"error": "not found"}, 404
+    return entry, 200
+
+
+def delete_comment(user: dict, rid: str, index: int):
+    ok = store.delete_comment(rid, index, **_actor_fields(user))
+    return ({"ok": True}, 200) if ok else ({"error": "not found"}, 404)
+
+
+def link_tickets(user: dict, rid: str, target: str):
+    target = (target or "").strip()
+    if not target or target == rid:
+        return {"error": "pick another ticket id"}, 400
+    if not store.exists(target) or not store.exists(rid):
+        return {"error": "not found"}, 404
+    store.link_reports(rid, target, **_actor_fields(user))
+    return {"ok": True}, 200

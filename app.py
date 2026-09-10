@@ -611,103 +611,56 @@ def api_status(request: Request, rid: str, status: str = Form("")):
     user = _current_user(request)
     if user is None:
         return JSONResponse({"error": "unauthorized"}, status_code=401)
-    if status in {"open", "triaged", "fixed", "wontfix", "duplicate"}:
-        if not store.exists(rid):
-            return JSONResponse({"error": "not found"}, status_code=404)
-        store.update_status(rid, status,
-                            actor=(user.get("username") or user.get("github_login") or "admin"),
-                            role=user.get("role") or "",
-                           actor_id=user.get("id"))
-    return {"ok": True}
+    payload, code = admin_api.set_status(user, rid, status)
+    return JSONResponse(payload, status_code=code)
 
 
 @app.post("/api/tickets/{rid}/delete")
 def api_delete(request: Request, rid: str):
     if _current_user(request) is None:
         return JSONResponse({"error": "unauthorized"}, status_code=401)
-    store.delete_report(rid)
-    return {"ok": True}
+    payload, code = admin_api.delete_ticket(rid)
+    return JSONResponse(payload, status_code=code)
 
 
 @app.post("/api/tickets/{rid}/tags")
 def api_tags(request: Request, rid: str,
              severity: str = Form(""), category: str = Form("")):
-    """Admin-editable severity/category tags on a report."""
     user = _current_user(request)
     if user is None:
         return JSONResponse({"error": "unauthorized"}, status_code=401)
-    if store.get_report(rid) is None:
-        return JSONResponse({"error": "not found"}, status_code=404)
-    sev = severity.strip().lower()
-    cat = category.strip().lower()
-    if sev and sev not in llm._SEVERITIES:
-        return JSONResponse({"error": f"bad severity: {sev}"}, status_code=400)
-    if cat and cat not in llm._CATEGORIES:
-        return JSONResponse({"error": f"bad category: {cat}"}, status_code=400)
-    store.set_tags(rid, sev or None, cat or None,
-                   actor=(user.get("username") or user.get("github_login") or "admin"),
-                   role=user.get("role") or "",
-                           actor_id=user.get("id"))
-    return {"ok": True}
+    payload, code = admin_api.set_tags(user, rid, severity, category)
+    return JSONResponse(payload, status_code=code)
 
 
 @app.post("/api/tickets/{rid}/comments")
-def api_comment_add(request: Request, rid: str,
-                    body: str = Form("")):
-    """Admin comment/note on a ticket."""
+def api_comment_add(request: Request, rid: str, body: str = Form("")):
     user = _current_user(request)
     if user is None:
         return JSONResponse({"error": "unauthorized"}, status_code=401)
-    body = body.strip()
-    if not body:
-        return JSONResponse({"error": "empty comment"}, status_code=400)
-    entry = store.add_comment(
-        rid,
-        (user.get("username") or user.get("github_login") or "admin"),
-        user.get("role") or "admin",
-        body,
-        actor_id=user.get("id"),
-    )
-    if entry is None:
-        return JSONResponse({"error": "not found"}, status_code=404)
-    return entry
+    payload, code = admin_api.add_comment(user, rid, body)
+    return JSONResponse(payload, status_code=code)
 
 
 @app.post("/api/tickets/{rid}/comments/delete")
-def api_comment_delete(request: Request, rid: str,
-                       index: int = Form(0)):
-    """Mark a comment as removed (append-only: the event stays, flagged)."""
+def api_comment_delete(request: Request, rid: str, index: int = Form(0)):
     user = _current_user(request)
     if user is None:
         return JSONResponse({"error": "unauthorized"}, status_code=401)
-    if not store.delete_comment(rid, index,
-                                actor=(user.get("username") or user.get("github_login") or "admin"),
-                                role=user.get("role") or "",
-                           actor_id=user.get("id")):
-        return JSONResponse({"error": "not found"}, status_code=404)
-    return {"ok": True}
+    payload, code = admin_api.delete_comment(user, rid, index)
+    return JSONResponse(payload, status_code=code)
 
 
 @app.post("/api/tickets/{rid}/link")
 def api_ticket_link(request: Request, rid: str, target: str = Form("")):
-    """Link two reports as related (bidirectional, logged on both)."""
     user = _current_user(request)
     if user is None:
         return JSONResponse({"error": "unauthorized"}, status_code=401)
-    target = target.strip()
-    if not target or target == rid:
-        return JSONResponse({"error": "pick another ticket id"},
-                            status_code=400)
-    if not store.exists(target) or not store.exists(rid):
-        return JSONResponse({"error": "not found"}, status_code=404)
-    store.link_reports(rid, target,
-                       actor=(user.get("username") or user.get("github_login") or "admin"),
-                       role=user.get("role") or "",
-                           actor_id=user.get("id"))
-    return {"ok": True}
+    payload, code = admin_api.link_tickets(user, rid, target)
+    return JSONResponse(payload, status_code=code)
 
 
-# ── people management (owner only) ────────────────────────────────────────
+# people management (owner only)
 def _require_owner(request: Request):
     user = _current_user(request)
     if user is None:
