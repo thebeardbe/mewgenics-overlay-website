@@ -318,9 +318,41 @@ _VERSION_URL = ("https://api.github.com/repos/thebeardbe/"
                 "mewgenics-breeding-overlay/releases/latest")
 _DEFAULT_VERSION = os.environ.get("BGBOX_OVERLAY_VERSION", "0.1.46")
 _VERSION_TTL = 300.0
-_version_cache = {"version": _DEFAULT_VERSION, "ts": 0.0}
-_version_lock = threading.Lock()
-_version_refreshing = False
+class VersionCache:
+    """Owned cache for the latest overlay release tag (tests can set it)."""
+
+    def __init__(self, default: str) -> None:
+        self._version = default
+        self._ts = 0.0
+        self._refreshing = False
+        self._lock = threading.Lock()
+
+    def get(self) -> str:
+        with self._lock:
+            return self._version
+
+    def begin_refresh(self, ttl: float) -> bool:
+        """True when a background refresh should start (atomic claim)."""
+        with self._lock:
+            if self._refreshing or time.time() - self._ts <= ttl:
+                return False
+            self._refreshing = True
+            return True
+
+    def finish_refresh(self, version: str | None = None) -> None:
+        with self._lock:
+            self._refreshing = False
+            if version:
+                self._version = version
+                self._ts = time.time()
+
+    def set_for_test(self, version: str, ts: float) -> None:
+        with self._lock:
+            self._version = version
+            self._ts = ts
+
+
+VERSIONS = VersionCache(_DEFAULT_VERSION)
 
 
 def _fetch_github_version() -> str:
@@ -340,30 +372,20 @@ def _fetch_github_version() -> str:
             return tag
     except Exception as exc:
         logger.warning("overlay version refresh failed: %s", exc)
-    return _version_cache["version"]
+    return VERSIONS.get()
 
 
 def latest_version() -> str:
     """Cached overlay version; refreshes in the background when stale."""
-    global _version_refreshing
-    now = time.time()
-    with _version_lock:
-        stale = now - _version_cache["ts"] > _VERSION_TTL
-        if stale and not _version_refreshing:
-            _version_refreshing = True
-
-            def _refresh():
-                global _version_refreshing
-                try:
-                    v = _fetch_github_version()
-                    with _version_lock:
-                        _version_cache["version"] = v
-                        _version_cache["ts"] = time.time()
-                finally:
-                    _version_refreshing = False
-
-            threading.Thread(target=_refresh, daemon=True).start()
-        return _version_cache["version"]
+    if VERSIONS.begin_refresh(_VERSION_TTL):
+        def _refresh():
+            try:
+                VERSIONS.finish_refresh(_fetch_github_version())
+            except Exception:
+                logger.exception("version refresh thread failed")
+                VERSIONS.finish_refresh()
+        threading.Thread(target=_refresh, daemon=True).start()
+    return VERSIONS.get()
 
 
 # ── public surface ────────────────────────────────────────────────────────

@@ -50,7 +50,7 @@ def _fresh_db():
     for f in os.listdir(_DATA):
         os.unlink(os.path.join(_DATA, f))
     bugbox_app.RATE.reset()
-    bugbox_app._version_cache.update(version="0.1.46", ts=float("inf"))
+    bugbox_app.VERSIONS.set_for_test("0.1.46", float("inf"))
     store.init()
     store.ensure_owner(bugbox_app.ADMIN_USER, bugbox_app.ADMIN_PASS)
 
@@ -62,7 +62,7 @@ def test_pages_render():
 
 
 def test_landing_version_comes_from_cache_not_placeholder():
-    bugbox_app._version_cache.update(version="9.9.9", ts=float("inf"))
+    bugbox_app.VERSIONS.set_for_test("9.9.9", float("inf"))
     html = client.get("/").text
     assert "v9.9.9" in html                 # caption + pill rendered dynamically
     assert "{version}" not in html          # no raw placeholder left behind
