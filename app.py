@@ -20,9 +20,8 @@ from __future__ import annotations
 import html
 import json
 import logging
-import os
 import re
-import secrets
+import os
 import socket
 socket.setdefaulttimeout(15)   # DNS hangs cannot stall threads
 import threading
@@ -36,6 +35,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
+import auth
 import llm
 import store
 
@@ -289,11 +289,6 @@ def _render(name: str, **ctx) -> HTMLResponse:
     return HTMLResponse(JINJA.get_template(name).render(**ctx))
 
 
-def _github_redirect_uri(request: Request) -> str:
-    if GITHUB_REDIRECT_URI:
-        return GITHUB_REDIRECT_URI
-    return f"{request.url.scheme}://{request.url.netloc}/auth/github/callback"
-
 
 # ── latest-overlay-version (for the download buttons / version pill) ───────
 _VERSION_URL = ("https://api.github.com/repos/thebeardbe/"
@@ -482,80 +477,21 @@ def github_login(request: Request):
         return RedirectResponse("/login?note=gh-unavailable", status_code=303)
     if _throttled(f"login:{_client_ip(request)}", *LOGIN_RATE_LIMIT):
         return RedirectResponse("/login?bad=1", status_code=303)
-    state = secrets.token_urlsafe(18)
-    resp = RedirectResponse(
-        "https://github.com/login/oauth/authorize?"
-        + urllib.parse.urlencode({
-            "client_id": GITHUB_CLIENT_ID,
-            "redirect_uri": _github_redirect_uri(request),
-            "scope": "read:user",
-            "state": state,
-        }),
-        status_code=303)
-    resp.set_cookie("oauth_state", state, httponly=True, samesite="lax",
-                    secure=COOKIE_SECURE, max_age=600)
-    return resp
+    return auth.start_login(request, client_id=GITHUB_CLIENT_ID,
+                            configured_redirect=GITHUB_REDIRECT_URI,
+                            cookie_secure=COOKIE_SECURE)
 
 
 @app.get("/auth/github/callback")
 def github_callback(request: Request, code: str = "", state: str = ""):
-    """Exchange the OAuth code, then approve-or-pending the developer."""
-    expected = request.cookies.get("oauth_state")
-    resp = RedirectResponse("/login", status_code=303)
+    """Exchange the OAuth code (logic lives in auth.py)."""
+    resp = auth.complete_login(
+        request, code, state, enabled=GITHUB_ENABLED,
+        client_id=GITHUB_CLIENT_ID, client_secret=GITHUB_CLIENT_SECRET,
+        configured_redirect=GITHUB_REDIRECT_URI, cookie_secure=COOKIE_SECURE,
+        login_cookie=_login_cookie)
     resp.delete_cookie("oauth_state")
-    if not GITHUB_ENABLED or not code or not state \
-            or not expected or not store.hmac_compare(state, expected):
-        return RedirectResponse("/login?bad=1", status_code=303)
-    try:
-        token = _gh_access_token(code, request)
-        profile = _gh_user(token)
-    except Exception:
-        logger.exception("github oauth failed")
-        return RedirectResponse("/login?bad=1", status_code=303)
-    gh_id = str(profile.get("id") or "")
-    gh_login = str(profile.get("login") or "")
-    if not gh_id or not gh_login:
-        return RedirectResponse("/login?bad=1", status_code=303)
-    user = store.user_by_github(gh_id, gh_login)
-    if user is None:
-        user = store.create_github_user(gh_id, gh_login, status="pending")
-    if user.get("status") != "approved":
-        page = RedirectResponse(f"/access?login={urllib.parse.quote(gh_login)}"
-                                f"&status={user.get('status', 'pending')}",
-                                status_code=303)
-        return page
-    resp = RedirectResponse("/admin", status_code=303)
-    _login_cookie(resp, user["id"])
     return resp
-
-
-def _gh_access_token(code: str, request: Request) -> str:
-    payload = urllib.parse.urlencode({
-        "client_id": GITHUB_CLIENT_ID,
-        "client_secret": GITHUB_CLIENT_SECRET,
-        "code": code,
-        "redirect_uri": _github_redirect_uri(request),
-    }).encode()
-    req = urllib.request.Request(
-        "https://github.com/login/oauth/access_token", data=payload,
-        headers={"Accept": "application/json",
-                 "User-Agent": "bugbox-oauth"})
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
-    token = data.get("access_token")
-    if not token:
-        raise RuntimeError("no access_token in github response")
-    return str(token)
-
-
-def _gh_user(token: str) -> dict:
-    req = urllib.request.Request(
-        "https://api.github.com/user",
-        headers={"Authorization": f"Bearer {token}",
-                 "Accept": "application/vnd.github+json",
-                 "User-Agent": "bugbox-oauth"})
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        return json.loads(resp.read().decode("utf-8"))
 
 
 @app.get("/access", response_class=HTMLResponse)
