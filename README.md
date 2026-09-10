@@ -84,13 +84,15 @@ constant-time verified (httponly + lax; set `BGBOX_COOKIE_SECURE=1` under
 https), the admin page escapes every rendered field (LLM output included),
 and every response gets nosniff/DENY/no-referrer headers. Self-hosted
 analytics is optional and off by default; enabling it adds the analytics
-origin to the content security policy of the pages that render the tag (the
-landing page, the report form and the thanks page) and of no other path,
-never `/admin` or `/login`. Handled 4xx and 5xx errors get a friendly error
-page in a browser (from `error_pages.py`),
-while requests to `/api/` and clients that send `Accept: application/json`
-keep their previous JSON or plain-text bodies. A small test suite
-lives in `tests/` (`python -m pytest tests/ -q`).
+origin to the content security policy of the pages that render the tag: the
+landing page, the report form and the thanks page on a normal response, and a
+browser error page on any public path (so a broken inbound link is visible).
+Errors under `/admin`, `/login`, `/api` and `/auth` stay untagged, since the
+OAuth callback URL carries an authorization code. Handled 4xx and 5xx errors
+get a friendly error page in a browser (from `error_pages.py`), while
+requests to `/api/` and clients that send `Accept: application/json` keep
+their previous JSON or plain-text bodies. A small test suite lives in
+`tests/` (`python -m pytest tests/ -q`).
 
 In **Nginx Proxy Manager** create a Proxy Host:
 

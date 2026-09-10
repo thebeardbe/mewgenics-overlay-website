@@ -8,7 +8,8 @@
 <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
 <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
 {# The analytics tag and its footer disclosure are one decision; both live in
-   _analytics.html, and error.html sets analytics_page to false to drop them. #}
+   _analytics.html. The page's render entry point passes analytics_page in
+   explicitly, so nothing here falls back to a default. #}
 {% from "_analytics.html" import analytics_head, analytics_footer with context %}
 {{ analytics_head() }}<style>
   :root { --bg:#14120f; --card:#1e1b16; --card2:#262219; --line:#3a3429;

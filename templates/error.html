@@ -1,7 +1,8 @@
 {% extends "base_public.html" %}
-{# An error response is never a real public page, so it carries neither the
-   analytics tag nor the footer disclosure that goes with it. #}
-{% set analytics_page = false %}
+{# analytics_page is set by _error_response: a public error path is tracked,
+   while errors under the private prefixes /admin, /login, /api and /auth stay
+   untagged. /auth is private because the OAuth callback carries an
+   authorization code, so an error there must never report that URL. #}
 {% block title %}Error {{ code }}{% endblock %}
 {% block content %}
 <div class="card center">

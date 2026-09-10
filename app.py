@@ -299,22 +299,43 @@ _CSP_STRICT = _csp(inline=False, analytics=False)
 _CSP_BASELINE = _csp(inline=True, analytics=False)
 _CSP_PUBLIC = _csp(inline=True, analytics=True)
 
-# The only normal responses that render the analytics tag: the landing page,
-# the report form and the thanks page (the POST /submit response).
+# The paths whose normal responses render the analytics tag: the landing
+# page, the report form and the thanks page (the POST /submit response).
 _ANALYTICS_PATHS = frozenset({"/", "/report", "/submit"})
+# Private and machine surfaces: their normal responses get the strict policy
+# and their error responses stay untracked (no tag, no origin). /auth is
+# private because the OAuth callback carries an authorization code and a
+# state value in its query string, and a code is a credential: an error there
+# must never render a tracked page that reports that URL to analytics.
+_PRIVATE_PREFIXES = ("/admin", "/login", "/api", "/auth")
+
+
+def _renders_analytics(path: str, *, error: bool = False) -> bool:
+    """Whether the response for *path* renders the analytics tag.
+
+    The single decision behind the tag and the analytics origin in the
+    policy. Normal responses render it only on _ANALYTICS_PATHS. An error
+    response tracks every public path, because the failing URL is how a
+    broken inbound link is found; _PRIVATE_PREFIXES stay untracked. With
+    analytics off, nothing renders it.
+    """
+    if not ANALYTICS_ORIGIN:
+        return False
+    if error:
+        return not path.startswith(_PRIVATE_PREFIXES)
+    return path in _ANALYTICS_PATHS
 
 
 def _csp_for(path: str) -> str:
-    """The policy for a normal response on *path* (errors pin the baseline).
+    """The policy for a normal response on *path* (errors set their own).
 
-    The analytics origin is granted only to the paths in _ANALYTICS_PATHS,
-    the ones that render the tag. Every other non-admin path keeps the
-    baseline policy, which still allows the inline styles the standalone
-    pages carry.
+    The analytics origin is granted only when _renders_analytics says the
+    response carries the tag; other non-private paths keep the baseline
+    policy, which still allows the standalone pages' inline styles.
     """
-    if path.startswith(("/admin", "/login", "/api")):
+    if path.startswith(_PRIVATE_PREFIXES):
         return _CSP_STRICT
-    if path in _ANALYTICS_PATHS:
+    if _renders_analytics(path):
         return _CSP_PUBLIC
     return _CSP_BASELINE
 
@@ -477,17 +498,25 @@ def _error_response(request: Request, code: int,
                     headers: dict | None = None) -> Response:
     """Error page for a browser, today's exact response for an API client.
 
-    Every error response carries the baseline CSP, not the strict one a
-    normal /admin/ or /login/ response gets, and not the public one either:
-    the baseline carries no analytics origin, so an error page never
-    authorises a third-party script it does not load. The error page is only
-    static copy plus an integer code, no scripts, no user-supplied content,
-    and its styling is the inline <style> block in base_public.html that the
-    strict policy would drop, which left a mistyped admin URL unstyled.
+    A browser error on a public path renders the tag, so it gets the public
+    policy. A JSON client gets bytes, not a page, so no tag renders and it
+    keeps the baseline policy; the shape is decided once here with the same
+    predicate render_error uses, so the tag and the origin always agree.
+    Errors under _PRIVATE_PREFIXES, and every error with analytics off, keep
+    the baseline policy (no origin, inline styles allowed).
+    The page itself is static copy plus an integer code, its styling is the
+    inline <style> block that the strict policy would drop (which left a
+    mistyped admin URL unstyled), and the policy is set explicitly here,
+    which wins because _security_headers only fills absent values.
     """
-    resp = error_pages.render_error(request, code, fallback,
-                                    render=_render_html, headers=headers)
-    resp.headers["Content-Security-Policy"] = _CSP_BASELINE
+    page = not error_pages.wants_json(request)
+    tracked = page and _renders_analytics(request.url.path, error=True)
+    resp = error_pages.render_error(
+        request, code, fallback, headers=headers,
+        render=lambda name, **ctx: _render_html(
+            name, analytics_page=tracked, **ctx))
+    resp.headers["Content-Security-Policy"] = (
+        _CSP_PUBLIC if tracked else _CSP_BASELINE)
     return _security_headers(request, resp)
 
 
@@ -586,19 +615,24 @@ def latest_version() -> str:
 # ── public surface ────────────────────────────────────────────────────────
 @app.get("/", response_class=HTMLResponse)
 def home():
-    return _render("index.html", version=latest_version())
+    return _public_page("index.html", version=latest_version(), path="/")
 
 
 def _public_page(template: str, title: str = "", active: str = "",
-                   **ctx) -> HTMLResponse:
-    """Render a public page through Jinja2 (autoescaped, cached templates)."""
+                 *, path: str, **ctx) -> HTMLResponse:
+    """Render a public page through Jinja2 (autoescaped, cached templates).
+
+    The analytics flag comes from _renders_analytics, never a template
+    default, so only a tracked path carries the tag.
+    """
     ctx["nav_active"] = active
+    ctx["analytics_page"] = _renders_analytics(path)
     return HTMLResponse(JINJA.get_template(template).render(**ctx))
 
 @app.get("/report", response_class=HTMLResponse)
 def report_page():
     return _public_page("report.html", "Report a problem", "active",
-                        report_url="/submit")
+                        report_url="/submit", path="/report")
 
 
 @app.post("/submit")
@@ -622,7 +656,7 @@ def submit(
         "log": log, "name": name, "contact": contact,
     })
     _analyze_in_background(rid)
-    return _public_page("thanks.html", "Thanks", rid=rid)
+    return _public_page("thanks.html", "Thanks", rid=rid, path="/submit")
 
 
 @app.post("/api/report")

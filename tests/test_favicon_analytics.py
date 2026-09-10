@@ -1,8 +1,9 @@
 """Favicon delivery, optional Umami analytics, and the content-security policy.
 
 Derived from app.py (the ``/favicon.ico`` route, the ``BGBOX_ANALYTICS_*``
-block, the ``_csp`` builder, ``_ANALYTICS_PATHS`` / ``_csp_for`` and
-``_error_response``), ``templates/*.html`` and ``static/*``.
+block, the ``_csp`` builder, ``_ANALYTICS_PATHS`` / ``_PRIVATE_PREFIXES`` /
+``_renders_analytics`` / ``_csp_for``, the referrer policy in
+``_security_headers``), ``templates/*.html`` and ``static/*``.
 
 Every expectation here is observed from the HTTP responses themselves (status,
 headers, body) and from the app's own warning log, so the checks survive
@@ -61,6 +62,20 @@ STRICT = (
     "img-src 'self' data:; font-src 'self'; connect-src 'self'; "
     "object-src 'none'; base-uri 'none'; frame-ancestors 'none'; "
     "form-action 'self'")
+# The baseline with the analytics origin in script-src and connect-src: the
+# policy every tag-rendering response carries.
+PRE_FEATURE_PUBLIC = (
+    "default-src 'self'; script-src 'self' 'unsafe-inline' " + ORIGIN + "; "
+    "style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
+    "font-src 'self'; connect-src 'self' " + ORIGIN + "; object-src 'none'; "
+    "base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
+
+# The referrer policy is deliberately unconditional: every response carries
+# `no-referrer`, tracked pages included. The app governs what its own pages
+# send onward, while the referrer for an inbound pageview is set by the site
+# that linked to us; relaxing ours only disclosed our origin to the external
+# sites we link to.
+REFERRER_NONE = "no-referrer"
 
 DISCLOSURE = "Page views are counted anonymously and without cookies."
 
@@ -78,19 +93,39 @@ ICON_LINKS = (
     '<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">',
 )
 
-# The only normal responses that render the analytics tag (app.py
-# _ANALYTICS_PATHS): the landing page, the report form and the thanks page
-# returned by POST /submit.
+# The normal responses that render the analytics tag (app.py _ANALYTICS_PATHS):
+# the landing page, the report form and the thanks page returned by POST
+# /submit.
 TAG_PAGES = ("home", "report", "submit")
+# An error response on a public path renders the tag too (app.py
+# _renders_analytics(error=True)): a missing public page, a 500 on a public
+# path, and a missing static asset, because the static mount 404s through the
+# same handler.
+TAG_ERRORS = ("public_error", "public_server_error", "static_missing")
+# Every surface that renders the tag, normal or error.
+TAG_RENDERERS = TAG_PAGES + TAG_ERRORS
+# The OAuth callback path is private: it carries an authorization code and a
+# state value, so neither a normal response nor an error may be tracked or
+# permit the analytics origin.
+AUTH_CALLBACK = "auth_callback"
+AUTH_CALLBACK_ERROR = "auth_callback_error"
+# Error responses under a private prefix: none renders a tag or the origin.
+PRIVATE_ERRORS = ("admin_error", "login_error", "api_error",
+                  AUTH_CALLBACK_ERROR)
 # Every other surface this suite can reach: none of them may be handed the
 # analytics origin.
 NON_TAG_PAGES = (
-    "access", "admin", "people", "login", "api_tickets",
-    "public_error", "admin_error", "login_error", "api_error",
-)
+    "access", "admin", "people", "login", "api_tickets", AUTH_CALLBACK,
+) + PRIVATE_ERRORS
+# Normal responses on the private prefixes keep the strict policy.
+STRICT_PAGES = ("login", "admin", "people", "api_tickets", AUTH_CALLBACK)
 NON_TAG_ASSETS = (
     "favicon", "static_favicon", "favicon_svg", "apple_touch_icon",
 )
+# A public error handed to a JSON client. The API/JSON carve-out returns bytes,
+# not a page, so no tag can render even though the path is public; its own key
+# because the tag/policy agreement is checked for it separately.
+JSON_PUBLIC_ERROR = "public_error_json"
 # Non-admin/login/api paths that keep the inline-style baseline (no origin).
 BASELINE_STYLE_PAGES = ("access",)
 BASELINE_STYLE_ASSETS = NON_TAG_ASSETS
@@ -177,16 +212,20 @@ _login = admin.post(
 )
 
 
-def grab(requester, path, accept="text/html", method="GET"):
+def grab(requester, path, accept="text/html", method="GET",
+         follow_redirects=None):
+    kwargs = {"headers": {"Accept": accept}}
+    if follow_redirects is not None:
+        kwargs["follow_redirects"] = follow_redirects
     if method == "POST":
         resp = requester.post(path, data={"category": "other",
-                                          "title": "probe"},
-                              headers={"Accept": accept})
+                                          "title": "probe"}, **kwargs)
     else:
-        resp = requester.get(path, headers={"Accept": accept})
+        resp = requester.get(path, **kwargs)
     return {
         "status": resp.status_code,
         "csp": resp.headers.get("content-security-policy"),
+        "referrer": resp.headers.get("referrer-policy"),
         "content_type": resp.headers.get("content-type"),
         "cache_control": resp.headers.get("cache-control"),
         "location": resp.headers.get("location"),
@@ -199,36 +238,63 @@ def asset(path):
     return {
         "status": resp.status_code,
         "csp": resp.headers.get("content-security-policy"),
+        "referrer": resp.headers.get("referrer-policy"),
         "content_type": resp.headers.get("content-type"),
         "cache_control": resp.headers.get("cache-control"),
         "sha256": hashlib.sha256(resp.content).hexdigest(),
         "length": len(resp.content),
+        "body": resp.text,
     }
 
+
+responses = {
+    "home": grab(client, "/"),
+    "report": grab(client, "/report"),
+    "submit": grab(client, "/submit", method="POST"),
+    "login": grab(client, "/login"),
+    "access": grab(client, "/access?login=devone"),
+    # The callback is a redirect, so it is observed without following it; the
+    # POST form of the same path exercises the routing error on it.
+    "auth_callback": grab(client, "/auth/github/callback",
+                          follow_redirects=False),
+    "auth_callback_error": grab(client, "/auth/github/callback",
+                                method="POST"),
+    "admin": grab(admin, "/admin"),
+    "people": grab(admin, "/admin/people"),
+    "public_error": grab(client, "/no-such-page"),
+    "admin_error": grab(admin, "/admin/no-such-page"),
+    "login_error": grab(client, "/login/no-such-page"),
+    "api_error": grab(client, "/api/no-such-page"),
+    "public_error_json": grab(client, "/no-such-page",
+                              accept="application/json"),
+    "api_tickets": grab(client, "/api/tickets",
+                        accept="application/json"),
+}
+
+# A 500 on a public path: patch the lookup home() calls, take the response,
+# then put the original back so no other grab sees the failure.
+_original_latest_version = bugbox_app.latest_version
+
+
+def _raise():
+    raise RuntimeError("probe: public server error")
+
+
+bugbox_app.latest_version = _raise
+responses["public_server_error"] = grab(client, "/")
+bugbox_app.latest_version = _original_latest_version
 
 print(json.dumps({
     "logs": _records,
     "login_status": _login.status_code,
-    "responses": {
-        "home": grab(client, "/"),
-        "report": grab(client, "/report"),
-        "submit": grab(client, "/submit", method="POST"),
-        "login": grab(client, "/login"),
-        "access": grab(client, "/access?login=devone"),
-        "admin": grab(admin, "/admin"),
-        "people": grab(admin, "/admin/people"),
-        "public_error": grab(client, "/no-such-page"),
-        "admin_error": grab(admin, "/admin/no-such-page"),
-        "login_error": grab(client, "/login/no-such-page"),
-        "api_error": grab(client, "/api/no-such-page"),
-        "api_tickets": grab(client, "/api/tickets",
-                            accept="application/json"),
-    },
+    "responses": responses,
     "assets": {
         "favicon": asset("/favicon.ico"),
         "static_favicon": asset("/static/favicon.ico"),
         "favicon_svg": asset("/static/favicon.svg"),
         "apple_touch_icon": asset("/static/apple-touch-icon.png"),
+        # A missing asset 404s through the app's error handler.
+        "static_missing": asset("/static/does-not-exist.css"),
     },
 }))
 '''
@@ -456,7 +522,7 @@ def test_public_csp_with_analytics_off_is_the_pre_feature_policy():
 @pytest.mark.parametrize("config", [OFF, ON], ids=["off", "on"])
 def test_strict_paths_keep_the_unchanged_strict_policy(config):
     data = _run(config)
-    for page in ("login", "admin", "people", "api_tickets"):
+    for page in STRICT_PAGES:
         assert data["responses"][page]["csp"] == STRICT, page
 
 
@@ -476,10 +542,12 @@ def test_analytics_on_public_csp_gains_only_the_script_and_connect_origin():
 
 def test_analytics_origin_is_granted_only_to_paths_that_render_the_tag():
     data = _run(ON)
-    for page in TAG_PAGES:
-        resp = data["responses"][page]
-        assert ORIGIN in (resp["csp"] or ""), page
-        assert "data-website-id" in resp["body"], page
+    # Every tag-rendering response, including a public error, is handed the
+    # origin. Every private path, present asset and JSON surface is not.
+    for key in TAG_RENDERERS:
+        resp = _view(data, key)
+        assert ORIGIN in (resp["csp"] or ""), key
+        assert "data-website-id" in resp["body"], key
     for key in NON_TAG_PAGES + NON_TAG_ASSETS:
         resp = _view(data, key)
         assert ORIGIN not in (resp["csp"] or ""), key
@@ -495,17 +563,22 @@ def test_other_public_paths_keep_inline_styles_without_the_origin(key):
     assert directives["style-src"] == ["'self'", "'unsafe-inline'"], key
 
 
-def test_analytics_on_error_responses_get_the_baseline_policy():
+def test_analytics_on_error_policy_follows_the_public_private_split():
     data = _run(ON)
-    for page in ("public_error", "admin_error", "login_error", "api_error"):
-        assert data["responses"][page]["csp"] == PRE_FEATURE_BASELINE, page
+    # An error on a public path renders the tag, so it carries the public
+    # policy with the origin; an error under /admin, /login or /api keeps the
+    # baseline policy exactly as before the feature.
+    for key in TAG_ERRORS:
+        assert _view(data, key)["csp"] == PRE_FEATURE_PUBLIC, key
+    for key in PRIVATE_ERRORS:
+        assert data["responses"][key]["csp"] == PRE_FEATURE_BASELINE, key
 
 
 @pytest.mark.parametrize("config", [OFF, ON], ids=["off", "on"])
 def test_strict_policy_never_permits_the_analytics_origin(config):
     data = _run(config)
     host = ORIGIN.split("//", 1)[1]
-    for page in ("login", "admin", "people", "api_tickets"):
+    for page in STRICT_PAGES:
         assert host not in data["responses"][page]["csp"], page
 
 
@@ -513,10 +586,11 @@ def test_error_response_on_a_strict_prefix_never_permits_the_origin():
     # The safety rule is that a third-party script is never permitted on an
     # admin/API surface. An error response served under /admin, /login or /api
     # is still one of those surfaces, so the origin must not appear in its
-    # policy either.
+    # policy either. The auth callback is the sharpest case: its URL carries
+    # an authorization code and a state value.
     data = _run(ON)
     host = ORIGIN.split("//", 1)[1]
-    for page in ("admin_error", "login_error", "api_error"):
+    for page in PRIVATE_ERRORS:
         resp = data["responses"][page]
         assert host not in (resp["csp"] or ""), page
         assert ORIGIN not in (resp["csp"] or ""), page
@@ -529,21 +603,30 @@ def test_analytics_on_public_pages_do_carry_the_script(page):
     assert "data-website-id" in _body(_run(ON), page)
 
 
-@pytest.mark.parametrize("page", ["public_error", "admin_error",
-                                  "login_error", "api_error"])
-def test_analytics_on_error_responses_never_carry_the_script(page):
+def test_analytics_on_error_responses_carry_the_script_off_private_prefixes():
     data = _run(ON)
-    resp = data["responses"][page]
-    assert "data-website-id" not in resp["body"], page
-    assert SCRIPT_URL not in resp["body"], page
-    assert "https://analytics.example.com" not in resp["body"], page
+    # A public error page renders the tag; an error under /admin, /login or
+    # /api does not, so it keeps its bytes free of the script and origin.
+    for key in TAG_ERRORS:
+        resp = _view(data, key)
+        assert "data-website-id" in resp["body"], key
+        assert SCRIPT_URL in resp["body"], key
+    for key in PRIVATE_ERRORS:
+        resp = data["responses"][key]
+        assert "data-website-id" not in resp["body"], key
+        assert SCRIPT_URL not in resp["body"], key
+        assert ORIGIN not in resp["body"], key
 
 
-def test_error_pages_do_not_advertise_analytics_without_the_script():
-    # An error response is explicitly "never a real public page" here, so it
-    # must not claim that page views are being counted.
-    for page in ("public_error", "admin_error", "login_error"):
-        assert DISCLOSURE not in _body(_run(ON), page), page
+def test_only_private_error_pages_withhold_the_analytics_disclosure():
+    # A public error page renders the tag, so it discloses the counting in the
+    # shared footer; an error under /admin, /login or /api does not render it
+    # and must not claim that page views are being counted.
+    data = _run(ON)
+    for key in TAG_ERRORS:
+        assert DISCLOSURE in _view(data, key)["body"], key
+    for key in PRIVATE_ERRORS:
+        assert DISCLOSURE not in data["responses"][key]["body"], key
 
 
 @pytest.mark.parametrize("page", ["admin", "login", "people", "access"])
@@ -551,3 +634,75 @@ def test_authenticated_and_login_pages_never_carry_the_script(page):
     data = _run(ON)
     assert "data-website-id" not in data["responses"][page]["body"], page
     assert SCRIPT_URL not in data["responses"][page]["body"], page
+
+
+def test_authentication_callback_error_is_untracked():
+    # The callback URL carries an authorization code and a state value, so an
+    # error on it must never render a tracked page that would report that URL
+    # to analytics. No tag, no origin, no disclosure and the baseline policy.
+    data = _run(ON)
+    resp = data["responses"][AUTH_CALLBACK_ERROR]
+    assert "data-website-id" not in resp["body"]
+    assert SCRIPT_URL not in resp["body"]
+    assert DISCLOSURE not in resp["body"]
+    assert ORIGIN not in (resp["csp"] or "")
+    assert resp["csp"] == PRE_FEATURE_BASELINE
+    assert resp["referrer"] == REFERRER_NONE
+
+
+def test_authentication_callback_normal_response_is_untracked():
+    # A normal callback response is a redirect, never a page: no tag, no
+    # origin, and the strict private policy.
+    data = _run(ON)
+    resp = data["responses"][AUTH_CALLBACK]
+    assert resp["status"] == 303, resp["status"]
+    assert "data-website-id" not in resp["body"]
+    assert SCRIPT_URL not in resp["body"]
+    assert ORIGIN not in (resp["csp"] or "")
+    assert resp["csp"] == STRICT
+    assert resp["referrer"] == REFERRER_NONE
+
+
+# ══ E. the invariant: tag and analytics origin agree; referrer is always none
+# app.py decides the tag and the analytics origin with _renders_analytics: a
+# response either renders the tag and permits the origin, or does neither. The
+# referrer policy is deliberately outside that decision: every response,
+# tracked or not, carries no-referrer.
+
+def test_every_response_carries_no_referrer_when_analytics_is_on():
+    data = _run(ON)
+    for key in TAG_RENDERERS + NON_TAG_PAGES + NON_TAG_ASSETS:
+        assert _view(data, key)["referrer"] == REFERRER_NONE, key
+    assert data["responses"][JSON_PUBLIC_ERROR]["referrer"] == REFERRER_NONE
+
+
+def test_referrer_policy_is_no_referrer_everywhere_when_analytics_is_off():
+    data = _run(OFF)
+    keys = TAG_RENDERERS + NON_TAG_PAGES + NON_TAG_ASSETS
+    for key in keys + (JSON_PUBLIC_ERROR,):
+        assert _view(data, key)["referrer"] == REFERRER_NONE, key
+
+
+def test_tag_and_policy_origin_always_agree():
+    # The matrix: the landing page, the report form, the submit response, a
+    # missing public page, a 500 on a public path, a missing page under each
+    # private prefix (the auth callback included), a missing static asset and
+    # the present static assets. The tag and the origin are one decision.
+    data = _run(ON)
+    for key in TAG_RENDERERS + NON_TAG_PAGES + NON_TAG_ASSETS:
+        resp = _view(data, key)
+        has_tag = "data-website-id" in resp["body"]
+        has_origin = ORIGIN in (resp["csp"] or "")
+        assert has_tag == has_origin, (key, has_tag, has_origin)
+        assert resp["referrer"] == REFERRER_NONE, key
+
+
+def test_json_carve_out_keeps_the_tag_and_origin_in_agreement():
+    # A public error handed to a JSON client is returned as bytes, not a page,
+    # so no tag can render; _error_response then keeps the baseline policy, so
+    # the origin is absent too.
+    resp = _run(ON)["responses"][JSON_PUBLIC_ERROR]
+    has_tag = "data-website-id" in resp["body"]
+    has_origin = ORIGIN in (resp["csp"] or "")
+    assert has_tag == has_origin, (JSON_PUBLIC_ERROR, has_tag, has_origin)
+    assert resp["referrer"] == REFERRER_NONE
