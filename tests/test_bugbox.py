@@ -31,11 +31,15 @@ REPORTER = {"X-Forwarded-For": "10.0.0.2"}
 
 
 def _login_client() -> TestClient:
-    """A fresh client that has completed an admin login (cookie persisted)."""
+    """A fresh client that has completed an admin login (cookie persisted)
+    and automatically sends the CSRF header on state-changing requests."""
     c = TestClient(bugbox_app.app)
     r = c.post("/login", data={"user": "admin", "password": "test-pass"},
                headers=ADMIN, follow_redirects=False)
     assert r.status_code == 303
+    csrf = c.cookies.get("bugbox_csrf", "")
+    if csrf:
+        c.headers["X-Bugbox-CSRF"] = csrf
     return c
 
 
@@ -656,3 +660,18 @@ def test_api_status_returns_404_for_unknown_ticket():
     r = logged.post("/api/tickets/nope/status",
                     data={"status": "triaged"}, headers=ADMIN)
     assert r.status_code == 404
+
+
+def test_csrf_token_required_for_admin_mutations():
+    logged = _login_client()
+    rid = store.add({"title": "csrf probe"})
+    # missing CSRF header -> 403
+    r = logged.post(f"/api/tickets/{rid}/status",
+                    data={"status": "triaged"}, headers={
+                        **ADMIN,
+                        "X-Bugbox-CSRF": ""}, )
+    assert r.status_code in (403, 401)
+    # with header (default in _login_client) it succeeds
+    ok = logged.post(f"/api/tickets/{rid}/status",
+                     data={"status": "triaged"}, headers=ADMIN)
+    assert ok.status_code == 200

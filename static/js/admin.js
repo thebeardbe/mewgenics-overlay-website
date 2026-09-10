@@ -7,10 +7,6 @@ const SEVERITIES = ["low", "medium", "high", "critical"];
 const CATEGORIES = ["parser", "save", "crash", "ui", "breeding",
                     "donations", "other"];
 
-function esc(s) {
-  return (s || "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;",
-    ">": "&gt;", '"': "&quot;" }[c]));
-}
 function ago(ts) {
   const m = Math.round((Date.now() / 1000 - ts) / 60);
   if (m < 1) return "just now";

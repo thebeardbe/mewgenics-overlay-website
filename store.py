@@ -134,7 +134,8 @@ def init() -> None:
                 token TEXT PRIMARY KEY,
                 user_id INTEGER NOT NULL,
                 created REAL NOT NULL,
-                expires REAL NOT NULL DEFAULT 0
+                expires REAL NOT NULL DEFAULT 0,
+                csrf TEXT NOT NULL DEFAULT ''
             )
             """
         )
@@ -142,6 +143,9 @@ def init() -> None:
         if "expires" not in scol:
             conn.execute(
                 "ALTER TABLE sessions ADD COLUMN expires REAL NOT NULL DEFAULT 0")
+        if "csrf" not in scol:
+            conn.execute(
+                "ALTER TABLE sessions ADD COLUMN csrf TEXT NOT NULL DEFAULT ''")
         ucols = [r[1] for r in conn.execute("PRAGMA table_info(users)")]
         if "display_name" not in ucols:
             conn.execute(
@@ -651,11 +655,12 @@ SESSION_TTL = 60 * 60 * 24 * 30   # server-side session lifetime
 
 def create_session(user_id: int) -> str:
     token = uuid.uuid4().hex + uuid.uuid4().hex
+    csrf = uuid.uuid4().hex + uuid.uuid4().hex
     with _lock, _connect() as conn:
         conn.execute(
-            "INSERT INTO sessions (token, user_id, created, expires) "
-            "VALUES (?, ?, ?, ?)",
-            (token, user_id, time.time(), time.time() + SESSION_TTL))
+            "INSERT INTO sessions (token, user_id, created, expires, csrf) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (token, user_id, time.time(), time.time() + SESSION_TTL, csrf))
     return token
 
 
@@ -664,13 +669,17 @@ def session_user(token: str | None) -> dict | None:
         return None
     with _lock, _connect() as conn:
         row = conn.execute(
-            "SELECT s.expires, " + _USR_JOIN +
+            "SELECT s.expires, s.csrf, " + _USR_JOIN +
             " FROM sessions s JOIN users u ON u.id = s.user_id "
             "WHERE s.token = ?", (token,)).fetchone()
         if row is not None and float(row[0] or 0) < time.time():
             conn.execute("DELETE FROM sessions WHERE token = ?", (token,))
             return None
-    return dict(row) if row else None
+        if row is not None:
+            d = dict(row)
+            d["csrf"] = row[1]
+            return d
+    return None
 
 
 def delete_session(token: str) -> None:

@@ -199,6 +199,17 @@ async def _hardening(request: Request, call_next):
         if not _origin_allowed(request):
             return JSONResponse({"error": "cross-origin request rejected"},
                                 status_code=403)
+        _token = request.cookies.get("bugbox_admin")
+        _path = request.url.path
+        _public = _path in ("/submit", "/api/report", "/login")
+        if _token and not _public:
+            _sess = store.session_user(_token)
+            _stored = (_sess or {}).get("csrf") or ""
+            if _stored:
+                _sent = request.headers.get("x-bugbox-csrf") or ""
+                if not store.hmac_compare(_sent, _stored):
+                    return JSONResponse({"error": "csrf check failed"},
+                                        status_code=403)
     resp = await call_next(request)
     resp.headers.setdefault("X-Content-Type-Options", "nosniff")
     resp.headers.setdefault("X-Frame-Options", "DENY")
@@ -257,6 +268,10 @@ def _who(user: dict | None) -> str:
 def _login_cookie(resp: Response, user_id: int) -> None:
     token = store.create_session(user_id)
     resp.set_cookie("bugbox_admin", token, httponly=True, samesite="lax",
+                    secure=COOKIE_SECURE, max_age=60 * 60 * 24 * 30)
+    sess = store.session_user(token)
+    csrf = (sess or {}).get("csrf") or ""
+    resp.set_cookie("bugbox_csrf", csrf, httponly=False, samesite="lax",
                     secure=COOKIE_SECURE, max_age=60 * 60 * 24 * 30)
 
 
