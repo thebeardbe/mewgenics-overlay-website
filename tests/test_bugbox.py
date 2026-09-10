@@ -675,3 +675,12 @@ def test_csrf_token_required_for_admin_mutations():
     ok = logged.post(f"/api/tickets/{rid}/status",
                      data={"status": "triaged"}, headers=ADMIN)
     assert ok.status_code == 200
+
+
+def test_github_logins_are_case_insensitive():
+    u = store.add_github_preapproval("MixedCaseDev")
+    assert u["github_login"] == "mixedcasedev"
+    assert store.user_by_github(None, "MIXEDCASEDEV") is not None
+    adopted = store.create_github_user("424242", "MixedCaseDev")
+    assert adopted["github_login"] == "mixedcasedev"
+    assert adopted["status"] == "approved"

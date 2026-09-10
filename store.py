@@ -570,7 +570,8 @@ def user_by_github(github_id: str | None, github_login: str | None) -> dict | No
                 "SELECT " + _COLS_USR + " FROM users WHERE github_id = ?", (github_id,)).fetchone()
         if row is None and github_login:
             row = conn.execute(
-                "SELECT " + _COLS_USR + " FROM users WHERE github_login = ?",
+                "SELECT " + _COLS_USR +
+                " FROM users WHERE LOWER(github_login) = LOWER(?)",
                 (github_login,)).fetchone()
     return dict(row) if row else None
 
@@ -578,10 +579,14 @@ def user_by_github(github_id: str | None, github_login: str | None) -> dict | No
 def create_github_user(github_id: str, github_login: str,
                        status: str = "pending") -> dict:
     now = time.time()
+    github_login = (github_login or "").strip().lower()
     username = github_login
     with _lock, _connect() as conn:
+        # GitHub logins are case-insensitive; match accordingly and store the
+        # canonical lowercase so lookups stay consistent.
         existing = conn.execute(
-            "SELECT " + _COLS_USR + " FROM users WHERE github_login = ? OR github_id = ?",
+            "SELECT " + _COLS_USR +
+            " FROM users WHERE LOWER(github_login) = LOWER(?) OR github_id = ?",
             (github_login, github_id)).fetchone()
         if existing:
             # Adopt an owner pre-approval (row created by login only) and
@@ -612,21 +617,21 @@ def create_github_user(github_id: str, github_login: str,
 
 def add_github_preapproval(github_login: str) -> dict | None:
     """Owner pre-approves a GitHub login before they ever connect."""
-    github_login = github_login.strip()
+    github_login = (github_login or "").strip().lower()
     if not github_login or len(github_login) > 40:
         return None
     with _lock, _connect() as conn:
         row = conn.execute(
-            "SELECT " + _COLS_USR + " FROM users WHERE github_login = ?",
-            (github_login,)).fetchone()
+            "SELECT " + _COLS_USR +
+            " FROM users WHERE LOWER(github_login) = ?", (github_login,)).fetchone()
         if row is None:
             conn.execute(
                 "INSERT INTO users (username, github_login, role, status, "
                 "created) VALUES (?, ?, 'admin', 'approved', ?)",
                 (github_login, github_login, time.time()))
             row = conn.execute(
-                "SELECT " + _COLS_USR + " FROM users WHERE github_login = ?",
-                (github_login,)).fetchone()
+                "SELECT " + _COLS_USR +
+                " FROM users WHERE LOWER(github_login) = ?", (github_login,)).fetchone()
     return dict(row)
 
 
