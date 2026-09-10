@@ -125,3 +125,67 @@ clear "auto"/system treatment instead of a person's name.
 
 - Automated notification delivery (email/push) is out of scope until the
   follow-up/thread model is settled.
+
+## Open follow-ups (not started)
+
+Nothing below is done. These are decisions and fixes still to make, recorded
+so they are not lost.
+
+1. **`_client_ip()` trusts the `X-Forwarded-For` header.** The helper in
+   app.py returns the first comma-separated value of that header whenever it
+   is present, with no check that the request actually came from a proxy that
+   sets it. Any caller can therefore send a made-up address and get a fresh
+   key for the report and login rate-limit buckets, or fill buckets for
+   someone else's address. Decide the trust model: read the header only
+   behind a configured trusted proxy, fall back to `request.client.host`
+   otherwise, and settle which end of a forwarded chain is trusted.
+
+2. **`BGBOX_ORIGINS` accepted format is undocumented and unvalidated.** The
+   value is split on commas and whitespace, lowercased, and each entry is
+   compared to `urlsplit(Origin).netloc`, so an entry has to be a bare
+   `host[:port]` with no scheme and no path. A full origin such as
+   `https://bugs.example.com` parses fine but can never match an Origin, and
+   the gate then rejects the request with no warning. Decide the accepted
+   format (bare netloc, or full origins that get normalised), document it in
+   `.env.example` and the README, and validate it at startup with a warning
+   for entries that cannot match.
+
+3. **Console output is not scrubbed.** `_ScrubFormatter` is attached only to
+   the optional rotating file handler, so secrets still reach stdout and
+   stderr (the container log) through tracebacks and log arguments. The
+   comment in app.py and the note in `.env.example` both say so. Decide
+   whether to scrub the console handler too, or accept the console as a
+   trusted sink and keep the warning prominent in the deploy docs.
+
+4. **No error pages for 400 and 422.** `error_pages.QUOTES` already carries a
+   400 row, but no browser-facing route renders it: every 400 in the app is
+   on a JSON or API path. A 422 from request validation has no row and no
+   handler, so a browser gets FastAPI's default JSON body. Decide the copy
+   for 422, route both codes through `_error_response`, and keep the JSON
+   shapes unchanged.
+
+5. **The 500 page copy promises that nothing was lost.** The quote says
+   "Nothing you sent was lost", while the comment above the table says the
+   500 explanation must not promise that data was saved. A crash can happen
+   before the report is stored, so the line is not always true. Rewrite it
+   so it makes no guarantee, or show it only where saving is known to have
+   happened.
+
+6. **`app.py` is over the size budget.** It is 928 lines, past the 600-line
+   warning and close to the 1000-line hard limit in the global guidelines.
+   The earlier split moved ticket mutations to `admin_api.py`, so the next
+   extraction should follow that shape: pick one concern (the hardening
+   middleware and security headers, the error-page wiring, or the report
+   routes) and move it out before adding more to the file.
+
+7. **Stray `_t2.py` at the repository root.** A 20-line one-off patch script
+   is tracked in git next to the application modules, left over from an
+   earlier editing session, and nothing imports it. Confirm it is obsolete
+   and remove it, or move it to a scratch location that is not tracked.
+
+8. **Live host settings are still open.** On the running host `BGBOX_HTTPS`
+   is `0`, so HSTS is off. HTTP/2 is disabled on the Nginx Proxy Manager
+   proxy host, and Force SSL is enabled but does not redirect HTTP to HTTPS.
+   Decide and apply: set `BGBOX_HTTPS=1` in the app environment, enable
+   HTTP/2 on the proxy host, and fix the redirect, then verify each from
+   outside the host.
