@@ -2,7 +2,8 @@
 
 Run (in the site repo, python env with fastapi/httpx/pytest):
 
-    BGBOX_ADMIN_PASS=test-pass BGBOX_COOKIE_KEY=test-key python -m pytest tests/ -q
+    BGBOX_ADMIN_USER=admin BGBOX_ADMIN_PASS=test-pass \
+        BGBOX_COOKIE_KEY=test-key python -m pytest tests/ -q
 """
 
 import json
@@ -13,6 +14,7 @@ import time
 # Isolate storage + secrets BEFORE importing the app.
 _DATA = tempfile.mkdtemp(prefix="bugbox-test-")
 os.environ["BGBOX_DATA"] = _DATA
+os.environ.setdefault("BGBOX_ADMIN_USER", "admin")
 os.environ.setdefault("BGBOX_ADMIN_PASS", "test-pass")
 os.environ.setdefault("BGBOX_COOKIE_KEY", "test-cookie-key")
 os.environ.pop("LLM_API_KEY", None)   # analysis disabled in tests

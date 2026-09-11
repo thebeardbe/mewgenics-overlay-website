@@ -15,7 +15,8 @@ which keeps the module-level logging configuration fully isolated.
 
 Run (see tests/test_bugbox.py for the environment):
 
-    BGBOX_ADMIN_PASS=test-pass BGBOX_COOKIE_KEY=test-key python -m pytest tests/ -q
+    BGBOX_ADMIN_USER=admin BGBOX_ADMIN_PASS=test-pass \
+        BGBOX_COOKIE_KEY=test-key python -m pytest tests/ -q
 """
 
 import os
@@ -106,6 +107,7 @@ def log_file_text():
     env.update({
         "BGBOX_LOG_FILE": os.path.join(tmp, "bugbox.log"),
         "BGBOX_DATA": os.path.join(tmp, "data"),
+        "BGBOX_ADMIN_USER": "admin",
         "BGBOX_ADMIN_PASS": SECRET,
         "BGBOX_COOKIE_KEY": COOKIE_KEY,
         "BGBOX_KEPT_VALUE": KEPT_VALUE,

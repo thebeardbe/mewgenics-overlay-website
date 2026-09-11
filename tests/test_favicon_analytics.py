@@ -16,7 +16,8 @@ each check.
 
 Run (see tests/test_bugbox.py for the environment):
 
-    BGBOX_ADMIN_PASS=test-pass BGBOX_COOKIE_KEY=test-key python -m pytest tests/ -q
+    BGBOX_ADMIN_USER=admin BGBOX_ADMIN_PASS=test-pass \
+        BGBOX_COOKIE_KEY=test-key python -m pytest tests/ -q
 """
 
 import hashlib
@@ -312,6 +313,7 @@ def _run(config):
            if not k.startswith("BGBOX_ANALYTICS")}
     env.update({
         "BGBOX_DATA": os.path.join(tmp, "data"),
+        "BGBOX_ADMIN_USER": "admin",
         "BGBOX_ADMIN_PASS": "test-pass",
         "BGBOX_COOKIE_KEY": "test-cookie-key",
         "BGBOX_OVERLAY_VERSION": "0.1.46",

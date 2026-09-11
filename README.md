@@ -52,12 +52,17 @@ Then deploy:
 
 ```bash
 cd bugbox
-cp .env.example .env        # set BGBOX_ADMIN_PASS, BGBOX_COOKIE_KEY,
-                            # LLM_API_KEY (or leave empty to disable analysis)
-                            # and BGBOX_COOKIE_SECURE=1 plus BGBOX_HTTPS=1
-                            # (HSTS) if served over https
+cp .env.example .env        # set BGBOX_ADMIN_USER and BGBOX_ADMIN_PASS,
+                            # BGBOX_COOKIE_KEY, LLM_API_KEY (or leave empty
+                            # to disable analysis) and BGBOX_COOKIE_SECURE=1
+                            # plus BGBOX_HTTPS=1 (HSTS) if served over https
 docker compose up -d --build
 ```
+
+`BGBOX_ADMIN_USER` and `BGBOX_ADMIN_PASS` have no defaults. Compose refuses to
+start when either is unset in `.env`, and the container itself logs the error
+and exits when either arrives empty, so a deployment with a broken login never
+comes up looking healthy.
 
 The container is reached two ways, neither of which needs a public port:
 

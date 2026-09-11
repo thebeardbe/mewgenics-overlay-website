@@ -5,7 +5,7 @@ WORKDIR /srv/bugbox
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY app.py admin_api.py api_utils.py auth.py error_pages.py llm.py store.py seed_demo.py ./
+COPY app.py admin_api.py api_utils.py auth.py error_pages.py llm.py store.py seed_demo.py version_cache.py ./
 COPY templates ./templates
 COPY static ./static
 

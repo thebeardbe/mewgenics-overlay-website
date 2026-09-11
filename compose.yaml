@@ -9,7 +9,7 @@ services:
       - proxy-network
     environment:
       # Admin login
-      BGBOX_ADMIN_USER: admin
+      BGBOX_ADMIN_USER: "${BGBOX_ADMIN_USER:?set in .env}"
       BGBOX_ADMIN_PASS: "${BGBOX_ADMIN_PASS:?set in .env}"
       BGBOX_COOKIE_KEY: "${BGBOX_COOKIE_KEY:?set in .env}"
       BGBOX_COOKIE_SECURE: "${BGBOX_COOKIE_SECURE:-0}"
@@ -17,6 +17,7 @@ services:
       BGBOX_HTTPS: "${BGBOX_HTTPS:-}"            # HSTS when the proxy terminates TLS
       BGBOX_ADMIN_NAME: "${BGBOX_ADMIN_NAME:-}"  # owner display name (also on /admin/people)
       BGBOX_ORIGINS: "${BGBOX_ORIGINS:-}"        # allowed POST origins for the CSRF origin gate
+      BGBOX_OVERLAY_VERSION: "${BGBOX_OVERLAY_VERSION:-}"  # landing-page version on a first start
       BGBOX_LOG_FILE: "${BGBOX_LOG_FILE:-}"      # rotating log file path (secrets scrubbed)
       BGBOX_ANALYTICS_SCRIPT: "${BGBOX_ANALYTICS_SCRIPT:-}"  # Umami script URL (off when empty)
       BGBOX_ANALYTICS_ID: "${BGBOX_ANALYTICS_ID:-}"          # Umami website id (off when empty)

@@ -114,6 +114,11 @@ clear "auto"/system treatment instead of a person's name.
   cross-origin `Origin` are rejected 403 (same-origin by default;
   BGBOX_ORIGINS allow-list optional).
 - **Startup warnings** for short/placeholder BGBOX_ADMIN_PASS (>=12 chars).
+  A missing or empty BGBOX_ADMIN_USER / BGBOX_ADMIN_PASS is now fatal: the
+  container logs the error and exits with code 2 instead of starting with a
+  disabled login. Failed logins warn with the caller address and are answered
+  with the attempts left, or the retry countdown once the 5/min per-IP login
+  limit is reached.
 - **Docker runs as an unprivileged user** (uid 10001), not root.
 - **Log hardening**: optional rotating log (BGBOX_LOG_FILE) with secrets
   scrubbed from records.
@@ -136,9 +141,14 @@ so they are not lost.
    is present, with no check that the request actually came from a proxy that
    sets it. Any caller can therefore send a made-up address and get a fresh
    key for the report and login rate-limit buckets, or fill buckets for
-   someone else's address. Decide the trust model: read the header only
-   behind a configured trusted proxy, fall back to `request.client.host`
-   otherwise, and settle which end of a forwarded chain is trusted.
+   someone else's address. The login feedback countdown is only as
+   trustworthy as this: the "attempts left" and retry seconds shown on
+   /login come from a bucket keyed by that same spoofable address, so a
+   caller who rotates it never sees a countdown, and one who picks someone
+   else's address can burn their budget. Decide the trust model: read the
+   header only behind a configured trusted proxy, fall back to
+   `request.client.host` otherwise, and settle which end of a forwarded chain
+   is trusted.
 
 2. **`BGBOX_ORIGINS` accepted format is undocumented and unvalidated.** The
    value is split on commas and whitespace, lowercased, and each entry is
@@ -171,12 +181,13 @@ so they are not lost.
    so it makes no guarantee, or show it only where saving is known to have
    happened.
 
-6. **`app.py` is over the size budget.** It is 928 lines, past the 600-line
+6. **`app.py` is over the size budget.** It is 925 lines, past the 600-line
    warning and close to the 1000-line hard limit in the global guidelines.
-   The earlier split moved ticket mutations to `admin_api.py`, so the next
-   extraction should follow that shape: pick one concern (the hardening
-   middleware and security headers, the error-page wiring, or the report
-   routes) and move it out before adding more to the file.
+   The overlay-version cache, its GitHub fetch and its persistence were the
+   most recent extraction (now `version_cache.py`); the next one should follow
+   that shape: pick one concern (the hardening middleware and security
+   headers, the error-page wiring, or the report routes) and move it out
+   before adding more to the file.
 
 7. **Stray `_t2.py` at the repository root.** A 20-line one-off patch script
    is tracked in git next to the application modules, left over from an

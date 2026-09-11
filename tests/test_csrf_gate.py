@@ -5,7 +5,8 @@ same request approach the existing suite uses (POST /submit).
 
 Run (see tests/test_bugbox.py for the environment):
 
-    BGBOX_ADMIN_PASS=test-pass BGBOX_COOKIE_KEY=test-key python -m pytest tests/ -q
+    BGBOX_ADMIN_USER=admin BGBOX_ADMIN_PASS=test-pass \
+        BGBOX_COOKIE_KEY=test-key python -m pytest tests/ -q
 """
 
 import itertools
@@ -15,6 +16,7 @@ import tempfile
 
 # Isolate storage + secrets BEFORE importing the app (mirrors test_bugbox.py).
 os.environ.setdefault("BGBOX_DATA", tempfile.mkdtemp(prefix="bugbox-csrf-"))
+os.environ.setdefault("BGBOX_ADMIN_USER", "admin")
 os.environ.setdefault("BGBOX_ADMIN_PASS", "test-pass")
 os.environ.setdefault("BGBOX_COOKIE_KEY", "test-cookie-key")
 os.environ.pop("LLM_API_KEY", None)   # analysis disabled in tests

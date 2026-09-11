@@ -18,7 +18,6 @@ Run:  uvicorn app:app --host 0.0.0.0 --port 8000   (see compose.yaml)
 from __future__ import annotations
 
 import html
-import json
 import logging
 import re
 import os
@@ -27,7 +26,6 @@ socket.setdefaulttimeout(15)   # DNS hangs cannot stall threads
 import threading
 import time
 import urllib.parse
-import urllib.request
 from pathlib import Path
 
 from fastapi import FastAPI, Form, Request
@@ -42,11 +40,17 @@ import auth
 import error_pages
 import llm
 import store
+# The overlay-version cache, its GitHub fetch and its on-disk persistence
+# live in version_cache.py; app.py keeps the VERSIONS object and
+# latest_version() for the pages that render the version.
+from version_cache import VERSIONS, latest_version  # noqa: F401
 
 store.init()
 app = FastAPI(title="Bugbox")
 
 logger = logging.getLogger("bugbox")
+# Uvicorn configures only its own loggers; without this, INFO lines are dropped.
+logging.basicConfig(level=logging.INFO)
 TEMPLATES = Path(__file__).parent / "templates"
 JINJA = Environment(
     loader=FileSystemLoader(str(Path(__file__).parent / "templates")),
@@ -86,10 +90,15 @@ _ALLOWED_ORIGINS = {
     (os.environ.get("BGBOX_ORIGINS", "").replace(",", " ").split()) if o.strip()
 }
 
-ADMIN_USER = os.environ.get("BGBOX_ADMIN_USER", "admin")
+ADMIN_USER = os.environ.get("BGBOX_ADMIN_USER", "")
 ADMIN_PASS = os.environ.get("BGBOX_ADMIN_PASS", "")
-# Optional display name for the owner (defaults to the username). The owner
-# can also edit it later on the People page; that choice survives restarts.
+if not ADMIN_USER or not ADMIN_PASS:
+    # A container with a broken login looks healthy, so refuse to start.
+    logger.error("admin login is not configured: set both BGBOX_ADMIN_USER "
+                 "(your sign-in name) and BGBOX_ADMIN_PASS (a long random "
+                 "password) in .env, then restart; neither has a default.")
+    raise SystemExit(2)
+# Optional owner display name; defaults to the username (editable on People).
 ADMIN_NAME = os.environ.get("BGBOX_ADMIN_NAME", "")
 COOKIE_KEY = os.environ.get("BGBOX_COOKIE_KEY", "change-me")
 COOKIE_SECURE = os.environ.get("BGBOX_COOKIE_SECURE", "").lower() not in (
@@ -146,6 +155,7 @@ JINJA.globals["analytics_script"] = ANALYTICS_SCRIPT if ANALYTICS_ORIGIN else ""
 JINJA.globals["analytics_id"] = ANALYTICS_ID if ANALYTICS_ORIGIN else ""
 
 MAX_BODY_BYTES = 400_000          # reject anything larger up front (nginx too)
+_LOG_FIELD_MAX = 64               # cap request text in one log line
 REPORT_RATE_LIMIT = (10, 60)      # (max, window seconds) per IP
 LOGIN_RATE_LIMIT = (5, 60)
 ADMIN_WRITE_RATE_LIMIT = (30, 60)   # per user per ticket
@@ -175,6 +185,19 @@ class RateLimiter:
                 return False
             bucket[1] += 1
             return bucket[1] > limit
+
+    def status(self, key: str, limit: int, window: float) -> tuple[int, int]:
+        """Read-only for *key*: (attempts left, seconds until the window
+        frees, rounded up); counts no attempt, and 0 left means refused.
+        """
+        now = time.monotonic()
+        with self._lock:
+            bucket = self._buckets.get(key)
+            if bucket is None or now - bucket[0] > window:
+                return limit, 0
+            left = max(0, limit - bucket[1])
+            free_in = bucket[0] + window - now
+            return left, (int(free_in) + 1 if left == 0 else 0)
 
     def prune(self, now=None) -> int:
         """Drop stale buckets (unbounded-memory guard). Returns count."""
@@ -218,14 +241,15 @@ def _maintenance_loop() -> None:
             logger.exception("maintenance sweep failed")
 
 
+_prev_owner = next((u for u in store.list_users() if u["role"] == "owner"), None)
 store.ensure_owner(ADMIN_USER, ADMIN_PASS, ADMIN_NAME)
 threading.Thread(target=_maintenance_loop, name="bugbox-maintenance",
                  daemon=True).start()
-
-if not ADMIN_PASS:
-    logger.warning("BGBOX_ADMIN_PASS is not set; the local owner login is "
-                   "DISABLED (fails closed). Set it in the environment.")
-elif len(ADMIN_PASS) < 12 or ADMIN_PASS.lower().startswith("change-me"):
+logger.info("admin login: user '%s' with the password from your .env "
+            "(BGBOX_ADMIN_PASS)%s", ADMIN_USER,
+            f"; owner renamed from '{(_prev_owner or {}).get('username')}'"
+            if _prev_owner and _prev_owner["username"] != ADMIN_USER else "")
+if len(ADMIN_PASS) < 12 or ADMIN_PASS.lower().startswith("change-me"):
     logger.warning("BGBOX_ADMIN_PASS looks short or placeholder-like. Use a "
                    "long random value (>= 12 chars).")
 if COOKIE_KEY in ("", "change-me", "change-me-too"):
@@ -536,82 +560,6 @@ async def _server_error(request: Request, exc: Exception) -> Response:
     return _error_response(request, 500)
 
 
-
-# ── latest-overlay-version (for the download buttons / version pill) ───────
-_VERSION_URL = ("https://api.github.com/repos/thebeardbe/"
-                "mewgenics-breeding-overlay/releases/latest")
-_DEFAULT_VERSION = os.environ.get("BGBOX_OVERLAY_VERSION", "0.1.46")
-_VERSION_TTL = 300.0
-class VersionCache:
-    """Owned cache for the latest overlay release tag (tests can set it)."""
-
-    def __init__(self, default: str) -> None:
-        self._version = default
-        self._ts = 0.0
-        self._refreshing = False
-        self._lock = threading.Lock()
-
-    def get(self) -> str:
-        with self._lock:
-            return self._version
-
-    def begin_refresh(self, ttl: float) -> bool:
-        """True when a background refresh should start (atomic claim)."""
-        with self._lock:
-            if self._refreshing or time.time() - self._ts <= ttl:
-                return False
-            self._refreshing = True
-            return True
-
-    def finish_refresh(self, version: str | None = None) -> None:
-        with self._lock:
-            self._refreshing = False
-            if version:
-                self._version = version
-                self._ts = time.time()
-
-    def set_for_test(self, version: str, ts: float) -> None:
-        with self._lock:
-            self._version = version
-            self._ts = ts
-
-
-VERSIONS = VersionCache(_DEFAULT_VERSION)
-
-
-def _fetch_github_version() -> str:
-    """Fetch the newest overlay release tag (e.g. '0.1.46'); best-effort."""
-    logger.debug("refreshing overlay version from GitHub")
-    try:
-        req = urllib.request.Request(
-            _VERSION_URL,
-            headers={"User-Agent": "bugbox-landing",
-                     "Accept": "application/vnd.github+json"},
-        )
-        with urllib.request.urlopen(req, timeout=4) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-        tag = str(data.get("tag_name") or "").lstrip("v")
-        if re.fullmatch(r"\d+\.\d+\.\d+", tag):
-            logger.debug("overlay version refreshed: %s", tag)
-            return tag
-    except Exception as exc:
-        logger.warning("overlay version refresh failed: %s", exc)
-    return VERSIONS.get()
-
-
-def latest_version() -> str:
-    """Cached overlay version; refreshes in the background when stale."""
-    if VERSIONS.begin_refresh(_VERSION_TTL):
-        def _refresh():
-            try:
-                VERSIONS.finish_refresh(_fetch_github_version())
-            except Exception:
-                logger.exception("version refresh thread failed")
-                VERSIONS.finish_refresh()
-        threading.Thread(target=_refresh, daemon=True).start()
-    return VERSIONS.get()
-
-
 # ── public surface ────────────────────────────────────────────────────────
 @app.get("/", response_class=HTMLResponse)
 def home():
@@ -712,38 +660,53 @@ def _analyze_in_background(rid: str) -> None:
 
 
 # ── admin auth ────────────────────────────────────────────────────────────
+def _login_failed(request: Request, user: str, key: str) -> RedirectResponse:
+    """Warn about one failed login, then send the visitor back with their count."""
+    left, wait = RATE.status(key, *LOGIN_RATE_LIMIT)
+    logger.warning("login failed for user %r from %s: %d left, %ds wait",
+                   user[:_LOG_FIELD_MAX], _client_ip(request), left, wait)
+    return RedirectResponse(f"/login?bad=1&left={left}&wait={wait}",
+                            status_code=303)
+
+
 @app.get("/login", response_class=HTMLResponse)
 def login_page(request: Request):
-    bad = ("<p class='bad'>Wrong user or password.</p>"
-           if request.query_params.get("bad") else "")
-    note = ""
-    if request.query_params.get("note") == "gh-unavailable":
-        note = ("<p class='bad'>GitHub sign-in is not enabled on this "
-                "server.</p>")
-    github_block = ""
-    if GITHUB_ENABLED:
-        github_block = (
-            "<div class='or'>or</div>"
-            "<a class='gh' href='/login/github'>GitHub developer sign-in</a>")
-    return _render("login.html", bad=bad, note=note,
-                   github_block=github_block)
+    bad = ""
+    if request.query_params.get("bad"):
+        # Only these clamped integers are interpolated, never request text.
+        def num(name: str, high: int) -> int:
+            raw = request.query_params.get(name, "")
+            fits = raw.isdigit() and len(raw) <= len(str(high))
+            return min(int(raw), high) if fits else 0
+        left = num("left", LOGIN_RATE_LIMIT[0])
+        wait = num("wait", LOGIN_RATE_LIMIT[1])
+        bad = (f"<p class='bad'>Too many attempts. Try again in {wait} "
+               f"second{'' if wait == 1 else 's'}.</p>" if wait else
+               f"<p class='bad'>Wrong user or password. {left} "
+               f"attempt{'' if left == 1 else 's'} left.</p>")
+    note = ("<p class='bad'>GitHub sign-in is not enabled on this server.</p>"
+            if request.query_params.get("note") == "gh-unavailable" else "")
+    github_block = (
+        "<div class='or'>or</div>"
+        "<a class='gh' href='/login/github'>GitHub developer sign-in</a>"
+        if GITHUB_ENABLED else "")
+    return _render("login.html", bad=bad, note=note, github_block=github_block)
 
 
 @app.post("/login")
 def login(request: Request, user: str = Form(""), password: str = Form("")):
     """Local owner login (the only local account)."""
-    if _throttled(f"login:{_client_ip(request)}", *LOGIN_RATE_LIMIT):
-        return RedirectResponse("/login?bad=1", status_code=303)
-    owner = None
-    if ADMIN_PASS:
-        owner = store.user_by_username(ADMIN_USER)
+    key = f"login:{_client_ip(request)}"
+    if _throttled(key, *LOGIN_RATE_LIMIT):
+        return _login_failed(request, user, key)
+    owner = store.user_by_username(ADMIN_USER)
     if owner and owner.get("role") == "owner" and owner.get("status") == \
             "approved" and store.hmac_compare(user, owner["username"]) \
             and store.verify_password(password, owner["password_hash"]):
         resp = RedirectResponse("/admin", status_code=303)
         _login_cookie(resp, owner["id"])
         return resp
-    return RedirectResponse("/login?bad=1", status_code=303)
+    return _login_failed(request, user, key)
 
 
 @app.get("/login/github")
@@ -752,7 +715,7 @@ def github_login(request: Request):
     if not GITHUB_ENABLED:
         return RedirectResponse("/login?note=gh-unavailable", status_code=303)
     if _throttled(f"login:{_client_ip(request)}", *LOGIN_RATE_LIMIT):
-        return RedirectResponse("/login?bad=1", status_code=303)
+        return _login_failed(request, "", f"login:{_client_ip(request)}")
     return auth.start_login(request, client_id=GITHUB_CLIENT_ID,
                             configured_redirect=GITHUB_REDIRECT_URI,
                             cookie_secure=COOKIE_SECURE)
