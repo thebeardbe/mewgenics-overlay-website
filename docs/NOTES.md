@@ -181,13 +181,15 @@ so they are not lost.
    so it makes no guarantee, or show it only where saving is known to have
    happened.
 
-6. **`app.py` is over the size budget.** It is 925 lines, past the 600-line
+6. **`app.py` is over the size budget.** It is 946 lines, past the 600-line
    warning and close to the 1000-line hard limit in the global guidelines.
    The overlay-version cache, its GitHub fetch and its persistence were the
-   most recent extraction (now `version_cache.py`); the next one should follow
-   that shape: pick one concern (the hardening middleware and security
-   headers, the error-page wiring, or the report routes) and move it out
-   before adding more to the file.
+   most recent extraction (now `version_cache.py`), and the startup lifespan
+   hook that primes that cache was added in app.py; moving it out is part of
+   this item when the cache extraction finishes. The next extraction should
+   follow the same shape: pick one concern (the hardening middleware and
+   security headers, the error-page wiring, or the report routes) and move
+   it out before adding more to the file.
 
 7. **Stray `_t2.py` at the repository root.** A 20-line one-off patch script
    is tracked in git next to the application modules, left over from an

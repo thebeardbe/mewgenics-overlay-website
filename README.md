@@ -1,9 +1,9 @@
-# Bugbox — self-hosted website + bug intake with LLM triage
+# Bugbox: self-hosted website + bug intake with LLM triage
 
 
 A tiny FastAPI service for your VPS that collects bug reports from the
 Mewgenics Breeding Overlay and triages them (severity,
-category, duplicate detection, likely cause). Reporters need **no account** —
+category, duplicate detection, likely cause). Reporters need **no account**:
 they open a link, paste, and submit. The developer reads the queue in a
 password-protected admin UI with **multi-user access**: one local `owner`
 account plus optional GitHub developer sign-ins that must be approved by the
@@ -11,9 +11,9 @@ owner on the People page before they gain access.
 
 Players reach it two ways:
 
-1. **Browser form** — the “Report a problem” button in the overlay's About
+1. **Browser form**: the “Report a problem” button in the overlay's About
    box opens `https://<your-domain>/report`.
-2. **Direct JSON POST** — the overlay can POST straight to `/api/report`
+2. **Direct JSON POST**: the overlay can POST straight to `/api/report`
    with `{title, body, log, app_version, game_patch}`.
 
 ## Deploy on your Ubuntu + Docker + Nginx Proxy Manager
@@ -113,12 +113,12 @@ If your proxy runs directly on the host instead of in a container, forward to
 
 ## LLM provider
 
-Any **OpenAI-compatible** endpoint works — set via `.env`:
+Any **OpenAI-compatible** endpoint works; configure it via `.env`:
 
 - OpenAI: `LLM_BASE_URL=https://api.openai.com/v1`, key + `gpt-4o-mini`
 - Groq/Mistral/etc: same shape, their base URL + key
 - Ollama on the VPS host: `LLM_BASE_URL=http://host.docker.internal:11434/v1`
-  (model e.g. `llama3.1`), no key needed — leave `LLM_API_KEY` empty but set
+  (model e.g. `llama3.1`), no key needed; leave `LLM_API_KEY` empty but set
   `LLM_BASE_URL`/`LLM_MODEL`.
 
 If `LLM_API_KEY` is empty *and* no local endpoint is set, analysis is skipped
@@ -144,6 +144,24 @@ and reports still land in the admin queue.
 - Reports (and their activity timelines) are kept indefinitely by
   design: this is a small self-hosted tool and the history is the
   point. Delete a report from the admin UI if you want it gone.
+
+## Repository conventions
+
+- The landing page falls back to the built-in release number in
+  `version_cache.py` (`_FALLBACK_VERSION`, used when neither GitHub nor the
+  persisted tag file has answered yet). Bump it to the **current overlay
+  release on every change to this repository**, so a brand new deployment
+  never advertises an old release. `BGBOX_OVERLAY_VERSION` overrides it for
+  one host only and never overrides a fetched tag.
+- The version cache is primed once at startup with a single best-effort
+  GitHub fetch whose wait is bounded (`PRIME_TIMEOUT` in `version_cache.py`,
+  eight seconds, DNS name resolution included); a fetch that outruns that
+  bound keeps running in the background. It is logged as `overlay version
+  <tag> resolved from <source>`; after that it refreshes in the background
+  once the tag is older than its five minute TTL. A fetch that failed
+  leaves the tag stale, so the first request may refresh it immediately. A
+  fetch that outran the startup wait is still in flight and keeps its
+  claim, so the first request defers until that fetch finishes.
 
 ## API summary
 

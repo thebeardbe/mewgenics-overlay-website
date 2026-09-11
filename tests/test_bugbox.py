@@ -25,6 +25,7 @@ from fastapi.testclient import TestClient
 import app as bugbox_app
 import llm
 import store
+import version_cache
 
 client = TestClient(bugbox_app.app)
 
@@ -68,6 +69,30 @@ def test_landing_version_comes_from_cache_not_placeholder():
     html = client.get("/").text
     assert "v9.9.9" in html                 # caption + pill rendered dynamically
     assert "{version}" not in html          # no raw placeholder left behind
+
+
+def test_lifespan_primes_the_overlay_version_before_the_first_request(
+        monkeypatch):
+    # Start from a value that is not what the fake fetch returns, so a render
+    # only shows the fetched tag when startup actually primed the cache.
+    bugbox_app.VERSIONS.set_for_test(version_cache.DEFAULT_VERSION,
+                                     float("inf"))
+    before = bugbox_app.VERSIONS.get()
+    fetched = "7.7.7"
+    calls = []
+    monkeypatch.setattr(version_cache, "fetch_latest",
+                        lambda: calls.append(1) or fetched)
+
+    with TestClient(bugbox_app.app) as primed:
+        # Entering the lifespan already fetched; no request was needed.
+        assert calls == [1]
+        first_render = primed.get("/").text
+
+    assert f"v{fetched}" in first_render
+    assert before != fetched and f"v{before}" not in first_render
+    assert bugbox_app.VERSIONS.get() == fetched
+    assert bugbox_app.VERSIONS.source() == version_cache.SOURCE_NETWORK
+    assert bugbox_app.VERSIONS.path.read_text(encoding="utf-8") == fetched
 
 
 def test_static_screenshots_are_served():

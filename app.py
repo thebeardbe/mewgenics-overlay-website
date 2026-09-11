@@ -22,10 +22,13 @@ import logging
 import re
 import os
 import socket
-socket.setdefaulttimeout(15)   # DNS hangs cannot stall threads
+# Bounds socket reads and writes only, not name resolution; the startup prime
+# covers a slow DNS answer with version_cache.PRIME_TIMEOUT.
+socket.setdefaulttimeout(15)
 import threading
 import time
 import urllib.parse
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Form, Request
@@ -43,10 +46,28 @@ import store
 # The overlay-version cache, its GitHub fetch and its on-disk persistence
 # live in version_cache.py; app.py keeps the VERSIONS object and
 # latest_version() for the pages that render the version.
-from version_cache import VERSIONS, latest_version  # noqa: F401
+from version_cache import VERSIONS, latest_version, prime  # noqa: F401
 
 store.init()
-app = FastAPI(title="Bugbox")
+
+
+@asynccontextmanager
+async def _startup_prime(_app: FastAPI):
+    """Prime the overlay version cache before the first request is served.
+
+    Why: the landing page renders the release number from that cache, and
+    the lazy background refresh only starts once a request arrives, so
+    without this a freshly started container showed the built-in fallback
+    (or a stale persisted tag) on the first page load. prime() waits at most
+    a few seconds (name resolution included) for one best-effort fetch and
+    never raises, so a slow or failed fetch cannot stop startup. All the
+    logic lives in version_cache.py.
+    """
+    prime()
+    yield
+
+
+app = FastAPI(title="Bugbox", lifespan=_startup_prime)
 
 logger = logging.getLogger("bugbox")
 # Uvicorn configures only its own loggers; without this, INFO lines are dropped.
@@ -651,7 +672,7 @@ def _analyze_in_background(rid: str) -> None:
                     actor="auto-triage", role="auto", meta={"auto": True})
             elif analysis.get("note"):
                 store.log_event(
-                    rid, "auto_triage", "auto-triage skipped — "
+                    rid, "auto_triage", "auto-triage skipped: "
                     + str(analysis.get("note")),
                     actor="auto-triage", role="auto", meta={"auto": True})
         except Exception:  # analysis must never break the request flow
@@ -789,7 +810,7 @@ def api_tickets(request: Request, status: str | None = None,
 
 @app.get("/api/tickets/{rid}")
 def api_ticket_detail(request: Request, rid: str):
-    """Full ticket incl. the heavy body/log columns — the list endpoint never
+    """Full ticket incl. the heavy body/log columns; the list endpoint never
     ships those, so the admin UI fetches them lazily on expand."""
     if _current_user(request) is None:
         return _api({"error": "unauthorized"}, 401)
