@@ -1,0 +1,50 @@
+name: CI
+
+# Runs the Python test suite on the default branch (main) for every push and
+# pull request, plus a manual run from the Actions tab.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Least privilege: the job only needs to read the checkout.
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    # Cap the job so a hung test run cannot hold a runner for GitHub's
+    # multi-hour default (the suite runs in seconds, so 15 minutes is ample).
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          # The suite targets the interpreter the project deploys on.
+          python-version: "3.12"
+
+      - name: Install dependencies
+        # pytest is the runner; httpx is the in-process HTTP client the
+        # FastAPI test client uses to exercise the app without a server.
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pytest httpx
+
+      - name: Run tests
+        # Run from the repository root with the root on the import path, so
+        # the suite can import the application modules that live there.
+        #
+        # No service container, database, network or secret is needed: the
+        # suite drives the app fully in-process.
+        #
+        # app.py does require BGBOX_ADMIN_USER and BGBOX_ADMIN_PASS at import
+        # time, but the suite sets both itself before importing the app, so
+        # the job must not preset them here: presetting either one makes the
+        # suite's own logins fail.
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python -m pytest
